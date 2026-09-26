@@ -173,7 +173,7 @@ func wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr) uintpt
 			procDestroyWindow.Call(uintptr(hwnd))
 			return 0
 		case idHelpAbout:
-			text, _ := syscall.UTF16PtrFromString("WinGo")
+			text, _ := syscall.UTF16PtrFromString("Task Manager 98")
 			caption, _ := syscall.UTF16PtrFromString("About")
 			procMessageBox.Call(uintptr(hwnd), uintptr(unsafe.Pointer(text)), uintptr(unsafe.Pointer(caption)), 0)
 			return 0
@@ -292,8 +292,8 @@ func main() {
 	icc.dwSize = uint32(unsafe.Sizeof(icc))
 	procInitCommonControlsEx.Call(uintptr(unsafe.Pointer(&icc)))
 
-	className, _ := syscall.UTF16PtrFromString("WinGoWindowClass")
-	title, _ := syscall.UTF16PtrFromString("WinGo")
+	className, _ := syscall.UTF16PtrFromString("TaskMgr98WindowClass")
+	title, _ := syscall.UTF16PtrFromString("Task Manager 98")
 
 	// IDC_ARROW cursor
 	cursor, _, _ := procLoadCursor.Call(0, uintptr(32512))

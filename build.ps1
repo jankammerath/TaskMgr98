@@ -1,1 +1,1 @@
-go build -buildvcs=false -ldflags "-H=windowsgui" -o WinGo.exe .
+go build -buildvcs=false -ldflags "-H=windowsgui" -o TaskMgr98.exe .
