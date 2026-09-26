@@ -422,7 +422,7 @@ func main() {
 		uintptr(unsafe.Pointer(className)),
 		uintptr(unsafe.Pointer(title)),
 		uintptr(wsOverlappedWindow|wsVisible),
-		cwUseDefault, cwUseDefault, 640, 480,
+		cwUseDefault, cwUseDefault, 420, 480,
 		0, 0,
 		hInstance,
 		0,
