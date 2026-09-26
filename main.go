@@ -169,6 +169,8 @@ var (
 	procInitCommonControlsEx = comctl32.NewProc("InitCommonControlsEx")
 	procSetTimer             = user32.NewProc("SetTimer")
 	procLoadIcon             = user32.NewProc("LoadIconW")
+	procGetSystemDirectory   = kernel32.NewProc("GetSystemDirectoryW")
+	procExtractIcon          = shell32.NewProc("ExtractIconW")
 	gdi32                    = syscall.NewLazyDLL("gdi32.dll")
 	procCreateFontIndirect   = gdi32.NewProc("CreateFontIndirectW")
 )
@@ -339,6 +341,26 @@ func logCrash(r interface{}) {
 	fmt.Fprintf(f, "panic: %v\n\n%s", r, debug.Stack())
 }
 
+// loadTaskManagerIcon extracts the real Task Manager icon out of system32\taskmgr.exe,
+// so the window/taskbar show it instead of the generic stock application icon.
+func loadTaskManagerIcon() syscall.Handle {
+	buf := make([]uint16, 260)
+	n, _, _ := procGetSystemDirectory.Call(uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
+	if n == 0 || n >= uintptr(len(buf)) {
+		return 0
+	}
+	exePath, err := syscall.UTF16PtrFromString(syscall.UTF16ToString(buf[:n]) + "\\taskmgr.exe")
+	if err != nil {
+		return 0
+	}
+	h, _, _ := procExtractIcon.Call(0, uintptr(unsafe.Pointer(exePath)), 0)
+	// ExtractIconW returns NULL (no icons) or -1 (file not found/invalid); either way fall back.
+	if h == 0 || uint32(h) == 0xFFFFFFFF {
+		return 0
+	}
+	return syscall.Handle(h)
+}
+
 func main() {
 	defer func() {
 		if r := recover(); r != nil {
@@ -363,8 +385,11 @@ func main() {
 
 	// IDC_ARROW cursor
 	cursor, _, _ := procLoadCursor.Call(0, uintptr(32512))
-	// IDI_APPLICATION icon (generic app icon; no custom .ico asset is bundled)
-	icon, _, _ := procLoadIcon.Call(0, uintptr(32512))
+	// Prefer the real Task Manager icon; fall back to the generic IDI_APPLICATION stock icon.
+	icon := uintptr(loadTaskManagerIcon())
+	if icon == 0 {
+		icon, _, _ = procLoadIcon.Call(0, uintptr(32512))
+	}
 
 	wc := wndClassEx{
 		style:         0,
