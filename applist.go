@@ -293,7 +293,7 @@ func layoutAppList() {
 	)
 
 	buttonY := buttonsTop + (buttonAreaHeight-buttonHeight)/2
-	x := area.right - buttonWidth
+	x := area.right - buttonWidth - buttonGap
 	procMoveWindow.Call(uintptr(hwndNewTask), uintptr(x), uintptr(buttonY), uintptr(buttonWidth), uintptr(buttonHeight), 1)
 	x -= buttonWidth + buttonGap
 	procMoveWindow.Call(uintptr(hwndSwitchTo), uintptr(x), uintptr(buttonY), uintptr(buttonWidth), uintptr(buttonHeight), 1)
