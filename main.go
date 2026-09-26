@@ -29,12 +29,13 @@ const (
 	iccBarClasses      = 0x00000004
 	iccListViewClasses = 0x00000002
 
-	tcmFirst      = 0x1300
-	tcmInsertItem = tcmFirst + 62 // TCM_INSERTITEMW
-	tcmAdjustRect = tcmFirst + 40 // TCM_ADJUSTRECT
-	tcmGetCurSel  = tcmFirst + 11 // TCM_GETCURSEL
-	tcifText      = 0x0001
-	tcnSelChange  = -551 // TCN_SELCHANGE
+	tcmFirst       = 0x1300
+	tcmInsertItem  = tcmFirst + 62 // TCM_INSERTITEMW
+	tcmAdjustRect  = tcmFirst + 40 // TCM_ADJUSTRECT
+	tcmGetCurSel   = tcmFirst + 11 // TCM_GETCURSEL
+	tcifText       = 0x0001
+	tcnSelChange   = -551 // TCN_SELCHANGE
+	lvnColumnClick = -108 // LVN_FIRST(-100) - 8
 
 	sbarsSizeGrip = 0x0100
 
@@ -86,6 +87,19 @@ type nmhdr struct {
 	hwndFrom syscall.Handle
 	idFrom   uintptr
 	code     int32
+}
+
+// nmListView mirrors NMLISTVIEW for reading the clicked column off LVN_COLUMNCLICK;
+// hdr's trailing padding (to 8-byte alignment) is load-bearing for iItem's offset.
+type nmListView struct {
+	hdr       nmhdr
+	iItem     int32
+	iSubItem  int32
+	uNewState uint32
+	uOldState uint32
+	uChanged  uint32
+	ptAction  point
+	lParam    uintptr
 }
 
 type tcItemW struct {
@@ -210,10 +224,17 @@ func wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr) (resul
 		// Reinterpret via &lParam (a real *uintptr) rather than unsafe.Pointer(lParam)
 		// directly, since the latter looks like a fabricated pointer to vet's unsafeptr check.
 		hdr := *(**nmhdr)(unsafe.Pointer(&lParam))
-		if hdr.hwndFrom == hwndTab && hdr.code == tcnSelChange {
+		switch {
+		case hdr.hwndFrom == hwndTab && hdr.code == tcnSelChange:
 			sel, _, _ := procSendMessage.Call(uintptr(hwndTab), tcmGetCurSel, 0, 0)
 			showAppList(int32(sel) == 0)
 			showProcList(int32(sel) == 1)
+		case hdr.hwndFrom == hwndAppList && hdr.code == lvnColumnClick:
+			nmlv := *(**nmListView)(unsafe.Pointer(&lParam))
+			setAppSortColumn(nmlv.iSubItem)
+		case hdr.hwndFrom == hwndProcList && hdr.code == lvnColumnClick:
+			nmlv := *(**nmListView)(unsafe.Pointer(&lParam))
+			setProcSortColumn(nmlv.iSubItem)
 		}
 		return 0
 	case wmCommand:

@@ -26,6 +26,12 @@ const (
 	bstChecked     = 1
 
 	checkboxWidth = 220
+
+	wmSetRedraw    = 0x000B
+	lvmGetTopIndex = lvmFirst + 39 // LVM_GETTOPINDEX
+	lvmGetItemRect = lvmFirst + 14 // LVM_GETITEMRECT
+	lvmScroll      = lvmFirst + 20 // LVM_SCROLL
+	lvirBounds     = 0
 )
 
 // processEntry32W mirrors PROCESSENTRY32W from tlhelp32.h.
@@ -112,6 +118,8 @@ var (
 	procLookupAccountSidW   = advapi32.NewProc("LookupAccountSidW")
 	procGetUserNameW        = advapi32.NewProc("GetUserNameW")
 
+	procInvalidateRect = user32.NewProc("InvalidateRect")
+
 	hwndProcList     syscall.Handle
 	hwndEndProcess   syscall.Handle
 	hwndShowAllUsers syscall.Handle
@@ -121,7 +129,45 @@ var (
 	showAllUsers       = true
 	prevProcTimes      = map[uint32]procTimes{}
 	currentProcEntries []procEntry
+
+	procSortColumn    int32 = 0
+	procSortAscending       = true
 )
+
+// setProcSortColumn toggles ascending/descending when the same header is clicked
+// again, or switches to ascending on a newly clicked column, then re-sorts.
+func setProcSortColumn(col int32) {
+	if procSortColumn == col {
+		procSortAscending = !procSortAscending
+	} else {
+		procSortColumn = col
+		procSortAscending = true
+	}
+	refreshProcList()
+}
+
+// sortProcEntries orders entries by the clicked column (Image Name/User Name/CPU/Mem
+// Usage), honoring procSortColumn/procSortAscending.
+func sortProcEntries(entries []procEntry) {
+	less := func(i, j int) bool {
+		switch procSortColumn {
+		case 1:
+			return entries[i].user < entries[j].user
+		case 2:
+			return entries[i].cpuPercent < entries[j].cpuPercent
+		case 3:
+			return entries[i].memKB < entries[j].memKB
+		default:
+			return entries[i].image < entries[j].image
+		}
+	}
+	sort.SliceStable(entries, func(i, j int) bool {
+		if procSortAscending {
+			return less(i, j)
+		}
+		return less(j, i)
+	})
+}
 
 // createProcListView creates the report-mode list view backing the Processes tab.
 // It starts hidden since the Applications tab is selected first.
@@ -267,7 +313,8 @@ func selectedProcEntry() (procEntry, bool) {
 }
 
 // refreshProcList re-enumerates running processes and repopulates the list,
-// restoring the previous selection (by PID) so it survives the refresh.
+// restoring the previous selection (by PID) and scroll position so they survive the
+// refresh, with redraw suppressed around the rebuild to avoid visible flicker.
 func refreshProcList() {
 	if hwndProcList == 0 {
 		return
@@ -282,6 +329,7 @@ func refreshProcList() {
 	if entry, ok := selectedProcEntry(); ok {
 		selectedPid = entry.pid
 	}
+	topIndex, _, _ := procSendMessage.Call(uintptr(hwndProcList), lvmGetTopIndex, 0, 0)
 
 	entries := enumerateProcesses()
 	if !showAllUsers && currentUserName != "" {
@@ -293,8 +341,9 @@ func refreshProcList() {
 		}
 		entries = filtered
 	}
-	sort.Slice(entries, func(i, j int) bool { return entries[i].image < entries[j].image })
+	sortProcEntries(entries)
 
+	procSendMessage.Call(uintptr(hwndProcList), wmSetRedraw, 0, 0)
 	procSendMessage.Call(uintptr(hwndProcList), lvmDeleteAllItems, 0, 0)
 	for i, e := range entries {
 		insertProcRow(int32(i), e)
@@ -309,6 +358,28 @@ func refreshProcList() {
 			}
 		}
 	}
+	restoreProcListTop(int32(topIndex), len(entries))
+	procSendMessage.Call(uintptr(hwndProcList), wmSetRedraw, 1, 0)
+	procInvalidateRect.Call(uintptr(hwndProcList), 0, 1)
+}
+
+// restoreProcListTop scrolls the list so the row that was on top before the refresh
+// (rows are always re-inserted starting at the top) is on top again, computing the
+// pixel offset from one row's height since LVM_SCROLL only takes pixel deltas.
+func restoreProcListTop(topIndex int32, count int) {
+	if topIndex <= 0 || int(topIndex) >= count {
+		return
+	}
+	var r rect
+	r.left = lvirBounds
+	if ok, _, _ := procSendMessage.Call(uintptr(hwndProcList), lvmGetItemRect, 0, uintptr(unsafe.Pointer(&r))); ok == 0 {
+		return
+	}
+	rowHeight := r.bottom - r.top
+	if rowHeight <= 0 {
+		return
+	}
+	procSendMessage.Call(uintptr(hwndProcList), lvmScroll, 0, uintptr(topIndex*rowHeight))
 }
 
 // enumerateProcesses snapshots running processes via CreateToolhelp32Snapshot and

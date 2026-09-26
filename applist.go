@@ -1,6 +1,7 @@
 package main
 
 import (
+	"sort"
 	"syscall"
 	"unsafe"
 )
@@ -206,7 +207,38 @@ var (
 	appListCallback = syscall.NewCallback(enumAppWindowsProc)
 	pendingEntries  []appEntry
 	currentEntries  []appEntry
+
+	// appSortColumn is -1 until the user clicks a header, matching the previous
+	// unsorted (enumeration-order) behavior by default.
+	appSortColumn    int32 = -1
+	appSortAscending       = true
 )
+
+// setAppSortColumn toggles ascending/descending when the same header is clicked
+// again, or switches to ascending on a newly clicked column, then re-sorts.
+func setAppSortColumn(col int32) {
+	if appSortColumn == col {
+		appSortAscending = !appSortAscending
+	} else {
+		appSortColumn = col
+		appSortAscending = true
+	}
+	refreshAppList()
+}
+
+// sortAppEntries orders entries by the Task title (the only column with varying
+// values; Status is always "Running"), honoring appSortColumn/appSortAscending.
+func sortAppEntries(entries []appEntry) {
+	if appSortColumn < 0 {
+		return
+	}
+	sort.SliceStable(entries, func(i, j int) bool {
+		if appSortAscending {
+			return entries[i].title < entries[j].title
+		}
+		return entries[j].title < entries[i].title
+	})
+}
 
 // createAppListView creates the report-mode list view backing the Applications tab.
 // It is parented to the main window (not the tab control) so its notifications and
@@ -355,6 +387,7 @@ func refreshAppList() {
 
 	pendingEntries = pendingEntries[:0]
 	procEnumWindows.Call(appListCallback, 0)
+	sortAppEntries(pendingEntries)
 
 	procSendMessage.Call(uintptr(hwndAppList), lvmDeleteAllItems, 0, 0)
 	if appImageList != 0 {
