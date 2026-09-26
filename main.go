@@ -443,7 +443,7 @@ func main() {
 		uintptr(unsafe.Pointer(className)),
 		uintptr(unsafe.Pointer(title)),
 		uintptr(wsOverlappedWindow|wsVisible),
-		cwUseDefault, cwUseDefault, 420, 480,
+		cwUseDefault, cwUseDefault, 480, 600,
 		0, 0,
 		hInstance,
 		0,
