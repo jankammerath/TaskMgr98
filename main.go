@@ -1,7 +1,11 @@
 package main
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"syscall"
 	"unsafe"
 )
@@ -320,7 +324,29 @@ func createStatusBar(hwnd syscall.Handle, hInstance uintptr) syscall.Handle {
 	return syscall.Handle(h)
 }
 
+// logCrash writes a panic and its stack trace next to the exe; the release build runs
+// with -H=windowsgui, so there's no console to see a panic message otherwise.
+func logCrash(r interface{}) {
+	dir := "."
+	if exePath, err := os.Executable(); err == nil {
+		dir = filepath.Dir(exePath)
+	}
+	f, err := os.Create(filepath.Join(dir, "TaskMgr98-crash.log"))
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "panic: %v\n\n%s", r, debug.Stack())
+}
+
 func main() {
+	defer func() {
+		if r := recover(); r != nil {
+			logCrash(r)
+			panic(r)
+		}
+	}()
+
 	// A window's message queue is bound to the OS thread that created it; without this
 	// the Go scheduler can migrate the goroutine to another thread and GetMessage/DispatchMessage
 	// stop delivering messages, making the window appear frozen.

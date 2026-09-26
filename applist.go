@@ -27,9 +27,26 @@ const (
 	lvcfmtLeft  = 0
 
 	lvifText     = 0x0001
+	lvifImage    = 0x0002
 	lvniSelected = 0x0002
 	lvisFocused  = 0x0001
 	lvisSelected = 0x0002
+
+	lvsilSmall      = 1
+	lvmSetImageList = lvmFirst + 3
+	ilcMask         = 0x00000001
+	ilcColor32      = 0x00000020
+
+	smCxSmIcon = 49
+	smCySmIcon = 50
+
+	wmGeticon       = 0x007F
+	iconSmall       = 0
+	iconBig         = 1
+	iconSmall2      = 2
+	gclpHicon       = -14
+	gclpHiconsm     = -34
+	smtoAbortIfHung = 0x0002
 
 	gwOwner        = 4
 	gwlExStyle     = -20
@@ -119,6 +136,18 @@ type appEntry struct {
 	title string
 }
 
+// safeCall invokes a LazyProc, recovering if resolving/calling it panics (e.g. an
+// export missing on the current Windows version) so one bad API can't crash the app.
+func safeCall(p *syscall.LazyProc, args ...uintptr) (r1 uintptr, ok bool) {
+	defer func() {
+		if recover() != nil {
+			r1, ok = 0, false
+		}
+	}()
+	r1, _, _ = p.Call(args...)
+	return r1, true
+}
+
 var (
 	procEnumWindows          = user32.NewProc("EnumWindows")
 	procIsWindowVisible      = user32.NewProc("IsWindowVisible")
@@ -129,6 +158,13 @@ var (
 	procPostMessage          = user32.NewProc("PostMessageW")
 	procSetForegroundWindow  = user32.NewProc("SetForegroundWindow")
 	procMapWindowPoints      = user32.NewProc("MapWindowPoints")
+	procSendMessageTimeout   = user32.NewProc("SendMessageTimeoutW")
+	procGetClassLongPtrW     = user32.NewProc("GetClassLongPtrW")
+	procGetSystemMetrics     = user32.NewProc("GetSystemMetrics")
+
+	procImageListCreate      = comctl32.NewProc("ImageList_Create")
+	procImageListReplaceIcon = comctl32.NewProc("ImageList_ReplaceIcon")
+	procImageListRemoveAll   = comctl32.NewProc("ImageList_RemoveAll")
 
 	comdlg32             = syscall.NewLazyDLL("comdlg32.dll")
 	procGetOpenFileNameW = comdlg32.NewProc("GetOpenFileNameW")
@@ -136,8 +172,10 @@ var (
 	procShellExecuteW    = shell32.NewProc("ShellExecuteW")
 
 	// appMainHwnd is excluded from the enumerated list so the app doesn't list itself.
-	appMainHwnd syscall.Handle
-	hwndAppList syscall.Handle
+	appMainHwnd  syscall.Handle
+	hwndAppList  syscall.Handle
+	appImageList syscall.Handle
+	fallbackIcon syscall.Handle
 
 	hwndEndTask  syscall.Handle
 	hwndSwitchTo syscall.Handle
@@ -178,6 +216,15 @@ func createAppListView(hwndParent syscall.Handle, hInstance uintptr) syscall.Han
 	}
 	addColumn(0, "Task", 260)
 	addColumn(1, "Status", 100)
+
+	if cx, ok := safeCall(procGetSystemMetrics, smCxSmIcon); ok {
+		if cy, ok := safeCall(procGetSystemMetrics, smCySmIcon); ok {
+			if himl, ok := safeCall(procImageListCreate, cx, cy, ilcColor32|ilcMask, 0, 8); ok && himl != 0 {
+				appImageList = syscall.Handle(himl)
+				procSendMessage.Call(uintptr(list), lvmSetImageList, lvsilSmall, uintptr(appImageList))
+			}
+		}
+	}
 
 	return list
 }
@@ -288,8 +335,20 @@ func refreshAppList() {
 	procEnumWindows.Call(appListCallback, 0)
 
 	procSendMessage.Call(uintptr(hwndAppList), lvmDeleteAllItems, 0, 0)
+	if appImageList != 0 {
+		safeCall(procImageListRemoveAll, uintptr(appImageList))
+	}
 	for i, entry := range pendingEntries {
-		insertAppRow(int32(i), entry.title)
+		iconIndex := int32(-1)
+		if appImageList != 0 {
+			hicon := getWindowIcon(entry.hwnd)
+			// ImageList_ReplaceIcon returns a 32-bit int (-1 on failure); reinterpret via int32,
+			// not a 32-bit mask, since Call widens the raw return value to a 64-bit uintptr.
+			if img, ok := safeCall(procImageListReplaceIcon, uintptr(appImageList), uintptr(iconIndex), uintptr(hicon)); ok && int32(img) != -1 {
+				iconIndex = int32(img)
+			}
+		}
+		insertAppRow(int32(i), entry.title, iconIndex)
 	}
 	currentEntries = append(currentEntries[:0], pendingEntries...)
 
@@ -342,11 +401,12 @@ func enumAppWindowsProc(hwnd syscall.Handle, lParam uintptr) uintptr {
 }
 
 // insertAppRow adds one "Task | Status" row to the list view.
-func insertAppRow(index int32, title string) {
+func insertAppRow(index int32, title string, iconIndex int32) {
 	titlePtr, _ := syscall.UTF16PtrFromString(title)
 	item := lvItemW{
-		mask:    lvifText,
+		mask:    lvifText | lvifImage,
 		iItem:   index,
+		iImage:  iconIndex,
 		pszText: titlePtr,
 	}
 	procSendMessage.Call(uintptr(hwndAppList), lvmInsertItemW, 0, uintptr(unsafe.Pointer(&item)))
@@ -359,6 +419,49 @@ func insertAppRow(index int32, title string) {
 		pszText:  statusPtr,
 	}
 	procSendMessage.Call(uintptr(hwndAppList), lvmSetItemW, 0, uintptr(unsafe.Pointer(&status)))
+}
+
+// getWindowIcon fetches a window's own small icon (matching what the taskbar/alt-tab
+// would show), falling back through WM_GETICON variants, the window class icon, and
+// finally a generic stock icon if the app exposes none.
+func getWindowIcon(hwnd syscall.Handle) syscall.Handle {
+	tryMessage := func(wParam uintptr) syscall.Handle {
+		var result uintptr
+		ret, ok := safeCall(procSendMessageTimeout, uintptr(hwnd), wmGeticon, wParam, 0, smtoAbortIfHung, 100, uintptr(unsafe.Pointer(&result)))
+		if ok && ret != 0 && result != 0 {
+			return syscall.Handle(result)
+		}
+		return 0
+	}
+	if h := tryMessage(iconSmall2); h != 0 {
+		return h
+	}
+	if h := tryMessage(iconSmall); h != 0 {
+		return h
+	}
+	if h := tryMessage(iconBig); h != 0 {
+		return h
+	}
+
+	tryClassIcon := func(index int32) syscall.Handle {
+		h, ok := safeCall(procGetClassLongPtrW, uintptr(hwnd), uintptr(index))
+		if !ok {
+			return 0
+		}
+		return syscall.Handle(h)
+	}
+	if h := tryClassIcon(gclpHiconsm); h != 0 {
+		return h
+	}
+	if h := tryClassIcon(gclpHicon); h != 0 {
+		return h
+	}
+
+	if fallbackIcon == 0 {
+		h, _, _ := procLoadIcon.Call(0, uintptr(32512))
+		fallbackIcon = syscall.Handle(h)
+	}
+	return fallbackIcon
 }
 
 // endSelectedTask asks the selected window to close, like Task Manager's End Task.
