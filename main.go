@@ -300,7 +300,7 @@ func createTabControl(hwnd syscall.Handle, hInstance uintptr) syscall.Handle {
 	)
 	tab := syscall.Handle(h)
 
-	for i, label := range []string{"Applications", "Processes", "Performance", "Networking", "Users"} {
+	for i, label := range []string{"Applications", "Processes", "Performance", "Networking"} {
 		text, _ := syscall.UTF16PtrFromString(label)
 		item := tcItemW{mask: tcifText, pszText: text}
 		procSendMessage.Call(uintptr(tab), tcmInsertItem, uintptr(i), uintptr(unsafe.Pointer(&item)))
