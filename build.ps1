@@ -1,0 +1,1 @@
+go build -buildvcs=false -ldflags "-H=windowsgui" -o WinGo.exe .
