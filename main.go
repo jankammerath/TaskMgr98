@@ -1,6 +1,7 @@
 package main
 
 import (
+	"runtime"
 	"syscall"
 	"unsafe"
 )
@@ -221,6 +222,11 @@ func createStatusBar(hwnd syscall.Handle, hInstance uintptr) syscall.Handle {
 }
 
 func main() {
+	// A window's message queue is bound to the OS thread that created it; without this
+	// the Go scheduler can migrate the goroutine to another thread and GetMessage/DispatchMessage
+	// stop delivering messages, making the window appear frozen.
+	runtime.LockOSThread()
+
 	hInstance, _, _ := procGetModuleHandle.Call(0)
 
 	icc := initCommonControlsEx{dwICC: iccTabClasses | iccBarClasses}
