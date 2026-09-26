@@ -1,4 +1,4 @@
-# TaskMgr98
+# Task Manager 98
 
 Rewrite of the classic Windows 98, NT4 and Windows XP Task Manager for Windows 11 (arm64 and x86_64).
 
