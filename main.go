@@ -29,6 +29,11 @@ const (
 
 	sbarsSizeGrip = 0x0100
 
+	wmSetFont              = 0x0030
+	spiGetNonClientMetrics = 0x0029
+
+	tabPadding = 6
+
 	idTab       = 100
 	idStatus    = 101
 	idFileExit  = 1001
@@ -78,6 +83,43 @@ type initCommonControlsEx struct {
 	dwICC  uint32
 }
 
+type logFont struct {
+	lfHeight         int32
+	lfWidth          int32
+	lfEscapement     int32
+	lfOrientation    int32
+	lfWeight         int32
+	lfItalic         byte
+	lfUnderline      byte
+	lfStrikeOut      byte
+	lfCharSet        byte
+	lfOutPrecision   byte
+	lfClipPrecision  byte
+	lfQuality        byte
+	lfPitchAndFamily byte
+	lfFaceName       [32]uint16
+}
+
+// nonClientMetrics mirrors NONCLIENTMETRICSW including iPaddedBorderWidth (Vista+).
+type nonClientMetrics struct {
+	cbSize             uint32
+	iBorderWidth       int32
+	iScrollWidth       int32
+	iScrollHeight      int32
+	iCaptionWidth      int32
+	iCaptionHeight     int32
+	lfCaptionFont      logFont
+	iSmCaptionWidth    int32
+	iSmCaptionHeight   int32
+	lfSmCaptionFont    logFont
+	iMenuWidth         int32
+	iMenuHeight        int32
+	lfMenuFont         logFont
+	lfStatusFont       logFont
+	lfMessageFont      logFont
+	iPaddedBorderWidth int32
+}
+
 var (
 	user32   = syscall.NewLazyDLL("user32.dll")
 	kernel32 = syscall.NewLazyDLL("kernel32.dll")
@@ -104,7 +146,10 @@ var (
 	procGetWindowRect        = user32.NewProc("GetWindowRect")
 	procMoveWindow           = user32.NewProc("MoveWindow")
 	procSendMessage          = user32.NewProc("SendMessageW")
+	procSystemParametersInfo = user32.NewProc("SystemParametersInfoW")
 	procInitCommonControlsEx = comctl32.NewProc("InitCommonControlsEx")
+	gdi32                    = syscall.NewLazyDLL("gdi32.dll")
+	procCreateFontIndirect   = gdi32.NewProc("CreateFontIndirectW")
 )
 
 // hwndTab and hwndStatus are set once in main and read by wndProc for layout.
@@ -153,8 +198,22 @@ func layoutChildren(hwnd syscall.Handle) {
 	procGetWindowRect.Call(uintptr(hwndStatus), uintptr(unsafe.Pointer(&statusRect)))
 	statusHeight := statusRect.bottom - statusRect.top
 
-	tabHeight := client.bottom - client.top - statusHeight
-	procMoveWindow.Call(uintptr(hwndTab), 0, 0, uintptr(client.right-client.left), uintptr(tabHeight), 1)
+	tabWidth := client.right - client.left - 2*tabPadding
+	tabHeight := client.bottom - client.top - statusHeight - 2*tabPadding
+	procMoveWindow.Call(uintptr(hwndTab), tabPadding, tabPadding, uintptr(tabWidth), uintptr(tabHeight), 1)
+}
+
+// createMessageFont builds the current system UI font (e.g. Segoe UI) so controls
+// don't fall back to the legacy stock bitmap font.
+func createMessageFont() uintptr {
+	var ncm nonClientMetrics
+	ncm.cbSize = uint32(unsafe.Sizeof(ncm))
+	ok, _, _ := procSystemParametersInfo.Call(spiGetNonClientMetrics, uintptr(ncm.cbSize), uintptr(unsafe.Pointer(&ncm)), 0)
+	if ok == 0 {
+		return 0
+	}
+	font, _, _ := procCreateFontIndirect.Call(uintptr(unsafe.Pointer(&ncm.lfMessageFont)))
+	return font
 }
 
 // createMenuBar builds the File/Options/View/Help menu bar and attaches it to hwnd.
@@ -270,6 +329,10 @@ func main() {
 	createMenuBar(syscall.Handle(hwnd))
 	hwndTab = createTabControl(syscall.Handle(hwnd), hInstance)
 	hwndStatus = createStatusBar(syscall.Handle(hwnd), hInstance)
+	if font := createMessageFont(); font != 0 {
+		procSendMessage.Call(uintptr(hwndTab), wmSetFont, font, 1)
+		procSendMessage.Call(uintptr(hwndStatus), wmSetFont, font, 1)
+	}
 	layoutChildren(syscall.Handle(hwnd))
 
 	procShowWindow.Call(hwnd, swShowDefault)
