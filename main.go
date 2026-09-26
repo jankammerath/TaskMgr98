@@ -21,24 +21,31 @@ const (
 	mfString = 0x00000000
 	mfPopup  = 0x00000010
 
-	iccTabClasses = 0x00000008
-	iccBarClasses = 0x00000004
+	iccTabClasses      = 0x00000008
+	iccBarClasses      = 0x00000004
+	iccListViewClasses = 0x00000002
 
 	tcmFirst      = 0x1300
 	tcmInsertItem = tcmFirst + 62 // TCM_INSERTITEMW
+	tcmAdjustRect = tcmFirst + 40 // TCM_ADJUSTRECT
+	tcmGetCurSel  = tcmFirst + 11 // TCM_GETCURSEL
 	tcifText      = 0x0001
+	tcnSelChange  = -551 // TCN_SELCHANGE
 
 	sbarsSizeGrip = 0x0100
 
 	wmSetFont              = 0x0030
+	wmNotify               = 0x004E
+	wmTimer                = 0x0113
 	spiGetNonClientMetrics = 0x0029
 
 	tabPadding = 6
 
-	idTab       = 100
-	idStatus    = 101
-	idFileExit  = 1001
-	idHelpAbout = 1002
+	idTab          = 100
+	idStatus       = 101
+	idFileExit     = 1001
+	idHelpAbout    = 1002
+	idAppListTimer = 1
 )
 
 type wndClassEx struct {
@@ -68,6 +75,13 @@ type msg struct {
 }
 
 type rect struct{ left, top, right, bottom int32 }
+
+// nmhdr mirrors NMHDR for reading WM_NOTIFY codes off lParam.
+type nmhdr struct {
+	hwndFrom syscall.Handle
+	idFrom   uintptr
+	code     int32
+}
 
 type tcItemW struct {
 	mask        uint32
@@ -149,6 +163,7 @@ var (
 	procSendMessage          = user32.NewProc("SendMessageW")
 	procSystemParametersInfo = user32.NewProc("SystemParametersInfoW")
 	procInitCommonControlsEx = comctl32.NewProc("InitCommonControlsEx")
+	procSetTimer             = user32.NewProc("SetTimer")
 	gdi32                    = syscall.NewLazyDLL("gdi32.dll")
 	procCreateFontIndirect   = gdi32.NewProc("CreateFontIndirectW")
 )
@@ -167,6 +182,18 @@ func wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr) uintpt
 		return 0
 	case wmSize:
 		layoutChildren(hwnd)
+		return 0
+	case wmTimer:
+		refreshAppList()
+		return 0
+	case wmNotify:
+		// Reinterpret via &lParam (a real *uintptr) rather than unsafe.Pointer(lParam)
+		// directly, since the latter looks like a fabricated pointer to vet's unsafeptr check.
+		hdr := *(**nmhdr)(unsafe.Pointer(&lParam))
+		if hdr.hwndFrom == hwndTab && hdr.code == tcnSelChange {
+			sel, _, _ := procSendMessage.Call(uintptr(hwndTab), tcmGetCurSel, 0, 0)
+			showAppList(int32(sel) == 0)
+		}
 		return 0
 	case wmCommand:
 		switch wParam & 0xFFFF {
@@ -202,6 +229,8 @@ func layoutChildren(hwnd syscall.Handle) {
 	tabWidth := client.right - client.left - 2*tabPadding
 	tabHeight := client.bottom - client.top - statusHeight - 2*tabPadding
 	procMoveWindow.Call(uintptr(hwndTab), tabPadding, tabPadding, uintptr(tabWidth), uintptr(tabHeight), 1)
+
+	layoutAppList()
 }
 
 // createMessageFont builds the current system UI font (e.g. Segoe UI) so controls
@@ -289,7 +318,7 @@ func main() {
 
 	hInstance, _, _ := procGetModuleHandle.Call(0)
 
-	icc := initCommonControlsEx{dwICC: iccTabClasses | iccBarClasses}
+	icc := initCommonControlsEx{dwICC: iccTabClasses | iccBarClasses | iccListViewClasses}
 	icc.dwSize = uint32(unsafe.Sizeof(icc))
 	procInitCommonControlsEx.Call(uintptr(unsafe.Pointer(&icc)))
 
@@ -328,16 +357,21 @@ func main() {
 	}
 
 	createMenuBar(syscall.Handle(hwnd))
+	appMainHwnd = syscall.Handle(hwnd)
 	hwndTab = createTabControl(syscall.Handle(hwnd), hInstance)
+	hwndAppList = createAppListView(hwndTab, hInstance)
 	hwndStatus = createStatusBar(syscall.Handle(hwnd), hInstance)
 	if font := createMessageFont(); font != 0 {
 		procSendMessage.Call(uintptr(hwndTab), wmSetFont, font, 1)
+		procSendMessage.Call(uintptr(hwndAppList), wmSetFont, font, 1)
 		procSendMessage.Call(uintptr(hwndStatus), wmSetFont, font, 1)
 	}
 	layoutChildren(syscall.Handle(hwnd))
+	refreshAppList()
 
 	procShowWindow.Call(hwnd, swShowDefault)
 	procUpdateWindow.Call(hwnd)
+	procSetTimer.Call(hwnd, idAppListTimer, 1500, 0)
 
 	var m msg
 	for {
