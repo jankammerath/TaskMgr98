@@ -164,6 +164,7 @@ var (
 	procSystemParametersInfo = user32.NewProc("SystemParametersInfoW")
 	procInitCommonControlsEx = comctl32.NewProc("InitCommonControlsEx")
 	procSetTimer             = user32.NewProc("SetTimer")
+	procLoadIcon             = user32.NewProc("LoadIconW")
 	gdi32                    = syscall.NewLazyDLL("gdi32.dll")
 	procCreateFontIndirect   = gdi32.NewProc("CreateFontIndirectW")
 )
@@ -204,6 +205,15 @@ func wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr) uintpt
 			text, _ := syscall.UTF16PtrFromString("Task Manager 98")
 			caption, _ := syscall.UTF16PtrFromString("About")
 			procMessageBox.Call(uintptr(hwnd), uintptr(unsafe.Pointer(text)), uintptr(unsafe.Pointer(caption)), 0)
+			return 0
+		case idEndTask:
+			endSelectedTask()
+			return 0
+		case idSwitchTo:
+			switchToSelectedTask()
+			return 0
+		case idNewTask:
+			showNewTaskDialog(hwnd)
 			return 0
 		}
 	}
@@ -327,14 +337,18 @@ func main() {
 
 	// IDC_ARROW cursor
 	cursor, _, _ := procLoadCursor.Call(0, uintptr(32512))
+	// IDI_APPLICATION icon (generic app icon; no custom .ico asset is bundled)
+	icon, _, _ := procLoadIcon.Call(0, uintptr(32512))
 
 	wc := wndClassEx{
 		style:         0,
 		lpfnWndProc:   syscall.NewCallback(wndProc),
 		hInstance:     syscall.Handle(hInstance),
+		hIcon:         syscall.Handle(icon),
 		hCursor:       syscall.Handle(cursor),
 		hbrBackground: syscall.Handle(colorBtnFace + 1),
 		lpszClassName: className,
+		hIconSm:       syscall.Handle(icon),
 	}
 	wc.cbSize = uint32(unsafe.Sizeof(wc))
 
@@ -359,11 +373,15 @@ func main() {
 	createMenuBar(syscall.Handle(hwnd))
 	appMainHwnd = syscall.Handle(hwnd)
 	hwndTab = createTabControl(syscall.Handle(hwnd), hInstance)
-	hwndAppList = createAppListView(hwndTab, hInstance)
+	hwndAppList = createAppListView(syscall.Handle(hwnd), hInstance)
+	createAppListButtons(syscall.Handle(hwnd), hInstance)
 	hwndStatus = createStatusBar(syscall.Handle(hwnd), hInstance)
 	if font := createMessageFont(); font != 0 {
 		procSendMessage.Call(uintptr(hwndTab), wmSetFont, font, 1)
 		procSendMessage.Call(uintptr(hwndAppList), wmSetFont, font, 1)
+		procSendMessage.Call(uintptr(hwndEndTask), wmSetFont, font, 1)
+		procSendMessage.Call(uintptr(hwndSwitchTo), wmSetFont, font, 1)
+		procSendMessage.Call(uintptr(hwndNewTask), wmSetFont, font, 1)
 		procSendMessage.Call(uintptr(hwndStatus), wmSetFont, font, 1)
 	}
 	layoutChildren(syscall.Handle(hwnd))
