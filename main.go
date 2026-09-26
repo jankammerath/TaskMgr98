@@ -193,6 +193,8 @@ var (
 	gdi32                    = syscall.NewLazyDLL("gdi32.dll")
 	procCreateFontIndirect   = gdi32.NewProc("CreateFontIndirectW")
 	procSetBkMode            = gdi32.NewProc("SetBkMode")
+
+	procCreateSolidBrush = gdi32.NewProc("CreateSolidBrush")
 )
 
 // hwndTab and hwndStatus are set once in main and read by wndProc for layout.
@@ -226,9 +228,13 @@ func wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr) (resul
 		refreshProcList()
 		return 0
 	case wmCtlColorBtn, wmCtlColorStatic:
-		// Without this, checkbox/static label text paints an opaque white rectangle
-		// behind it that doesn't match the window's COLOR_BTNFACE background.
 		procSetBkMode.Call(wParam, transparentBkMode)
+
+		if syscall.Handle(lParam) == hwndShowAllUsers {
+			tabBgBrush, _, _ := procCreateSolidBrush.Call(0x00F9F9F9)
+			return tabBgBrush
+		}
+
 		brush, _, _ := procGetSysColorBrush.Call(colorBtnFace)
 		return brush
 	case wmNotify:
