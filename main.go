@@ -45,11 +45,12 @@ const (
 
 	tabPadding = 6
 
-	idTab          = 100
-	idStatus       = 101
-	idFileExit     = 1001
-	idHelpAbout    = 1002
-	idAppListTimer = 1
+	idTab           = 100
+	idStatus        = 101
+	idFileExit      = 1001
+	idHelpAbout     = 1002
+	idAppListTimer  = 1
+	timerIntervalMs = 1500
 )
 
 type wndClassEx struct {
@@ -192,6 +193,7 @@ func wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr) uintpt
 		return 0
 	case wmTimer:
 		refreshAppList()
+		refreshProcList()
 		return 0
 	case wmNotify:
 		// Reinterpret via &lParam (a real *uintptr) rather than unsafe.Pointer(lParam)
@@ -200,6 +202,7 @@ func wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr) uintpt
 		if hdr.hwndFrom == hwndTab && hdr.code == tcnSelChange {
 			sel, _, _ := procSendMessage.Call(uintptr(hwndTab), tcmGetCurSel, 0, 0)
 			showAppList(int32(sel) == 0)
+			showProcList(int32(sel) == 1)
 		}
 		return 0
 	case wmCommand:
@@ -220,6 +223,12 @@ func wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr) uintpt
 			return 0
 		case idNewTask:
 			showNewTaskDialog(hwnd)
+			return 0
+		case idEndProcess:
+			endSelectedProcess()
+			return 0
+		case idShowAllUsers:
+			refreshProcList()
 			return 0
 		}
 	}
@@ -247,6 +256,7 @@ func layoutChildren(hwnd syscall.Handle) {
 	procMoveWindow.Call(uintptr(hwndTab), tabPadding, tabPadding, uintptr(tabWidth), uintptr(tabHeight), 1)
 
 	layoutAppList()
+	layoutProcList()
 }
 
 // createMessageFont builds the current system UI font (e.g. Segoe UI) so controls
@@ -436,6 +446,8 @@ func main() {
 	hwndTab = createTabControl(syscall.Handle(hwnd), hInstance)
 	hwndAppList = createAppListView(syscall.Handle(hwnd), hInstance)
 	createAppListButtons(syscall.Handle(hwnd), hInstance)
+	hwndProcList = createProcListView(syscall.Handle(hwnd), hInstance)
+	createProcListButtons(syscall.Handle(hwnd), hInstance)
 	hwndStatus = createStatusBar(syscall.Handle(hwnd), hInstance)
 	if font := createMessageFont(); font != 0 {
 		procSendMessage.Call(uintptr(hwndTab), wmSetFont, font, 1)
@@ -443,6 +455,9 @@ func main() {
 		procSendMessage.Call(uintptr(hwndEndTask), wmSetFont, font, 1)
 		procSendMessage.Call(uintptr(hwndSwitchTo), wmSetFont, font, 1)
 		procSendMessage.Call(uintptr(hwndNewTask), wmSetFont, font, 1)
+		procSendMessage.Call(uintptr(hwndProcList), wmSetFont, font, 1)
+		procSendMessage.Call(uintptr(hwndEndProcess), wmSetFont, font, 1)
+		procSendMessage.Call(uintptr(hwndShowAllUsers), wmSetFont, font, 1)
 		procSendMessage.Call(uintptr(hwndStatus), wmSetFont, font, 1)
 	}
 	layoutChildren(syscall.Handle(hwnd))
@@ -450,7 +465,7 @@ func main() {
 
 	procShowWindow.Call(hwnd, swShowDefault)
 	procUpdateWindow.Call(hwnd)
-	procSetTimer.Call(hwnd, idAppListTimer, 1500, 0)
+	procSetTimer.Call(hwnd, idAppListTimer, timerIntervalMs, 0)
 
 	var m msg
 	for {
