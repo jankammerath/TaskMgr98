@@ -387,8 +387,18 @@ func refreshAppList() {
 // enumAppWindowsProc is the EnumWindows callback; it collects titles of top-level,
 // visible, non-tool-window applications, mirroring what Task Manager's Applications
 // tab shows.
-func enumAppWindowsProc(hwnd syscall.Handle, lParam uintptr) uintptr {
+//
+// This runs as a syscall.NewCallback invoked directly by native EnumWindows code, so a
+// panic here can't be caught by an outer Go recover (see wndProc for the same reasoning)
+// -- recover locally so one bad window can't crash the whole app.
+func enumAppWindowsProc(hwnd syscall.Handle, lParam uintptr) (result uintptr) {
 	const enumContinue = 1
+
+	defer func() {
+		if recover() != nil {
+			result = enumContinue
+		}
+	}()
 
 	if hwnd == appMainHwnd {
 		return enumContinue

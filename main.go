@@ -182,8 +182,19 @@ var (
 	hwndStatus syscall.Handle
 )
 
-// wndProc handles window messages; WM_DESTROY quits the message loop, ending the process.
-func wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr) uintptr {
+// wndProc is invoked directly by Windows (via the syscall.NewCallback registered as
+// lpfnWndProc), so a panic here can't be caught by main()'s defer/recover -- Go can't
+// unwind a panic across the native DispatchMessage stack frame in between, and the
+// whole process aborts instead. Recover right here so a bug in any message handler
+// (e.g. refreshAppList/refreshProcList on WM_TIMER) can't take down the app.
+func wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr) (result uintptr) {
+	defer func() {
+		if r := recover(); r != nil {
+			logCrash(r)
+			ret, _, _ := procDefWindowProc.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
+			result = ret
+		}
+	}()
 	switch message {
 	case wmDestroy:
 		procPostQuitMessage.Call(0)

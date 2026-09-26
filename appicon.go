@@ -75,6 +75,24 @@ var (
 	iidIShellItemImageFactory = guid{0xbcc18b79, 0xba16, 0x442f, [8]byte{0x80, 0xc4, 0x8a, 0x59, 0xc3, 0x0c, 0x46, 0x3b}}
 )
 
+// utf16PtrToString reads a NUL-terminated UTF-16 string from a raw pointer value,
+// stopping at the terminator instead of over-reading a fixed-size buffer.
+func utf16PtrToString(addr uintptr) string {
+	if addr == 0 {
+		return ""
+	}
+	base := *(**uint16)(unsafe.Pointer(&addr))
+	var chars []uint16
+	for i := uintptr(0); i < 32768; i++ {
+		c := *(*uint16)(unsafe.Pointer(uintptr(unsafe.Pointer(base)) + i*2))
+		if c == 0 {
+			break
+		}
+		chars = append(chars, c)
+	}
+	return syscall.UTF16ToString(chars)
+}
+
 // getUwpWindowIcon extracts the modern shell icon for packaged apps (e.g. Calculator)
 // using the window's AppUserModelID and IShellItemImageFactory.
 func getUwpWindowIcon(hwnd syscall.Handle) syscall.Handle {
@@ -111,8 +129,7 @@ func getUwpWindowIcon(hwnd syscall.Handle) syscall.Handle {
 	defer procPropVariantClear.Call(uintptr(unsafe.Pointer(&pv)))
 
 	// Construct shell:AppsFolder\<AppUserModelID>
-	strPtr := *(**[1024]uint16)(unsafe.Pointer(&pv.valPtr))
-	aumidStr := syscall.UTF16ToString(strPtr[:])
+	aumidStr := utf16PtrToString(pv.valPtr)
 	parsingName, _ := syscall.UTF16PtrFromString("shell:AppsFolder\\" + aumidStr)
 
 	var pImageFactory uintptr
@@ -203,10 +220,10 @@ func getWindowIcon(hwnd syscall.Handle) syscall.Handle {
 		return h
 	}
 
-	// 3. Try packaged app extraction (UWP / WinUI Calculator, Settings, etc.)
-	if h := getUwpWindowIcon(hwnd); h != 0 {
-		return h
-	}
+	// 3. Packaged app extraction (UWP / WinUI Calculator, Settings, etc.) is disabled:
+	// it reproducibly hard-crashes the process (likely a bad COM vtable call) with
+	// Calculator specifically, and that kind of native fault can't be caught by
+	// recover(), so skip straight to the file-icon fallback below instead.
 
 	// 4. Fallback: Extract from the executable file path
 	var pid uint32
