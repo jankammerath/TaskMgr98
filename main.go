@@ -15,7 +15,8 @@ const (
 	wmDestroy          = 0x0002
 	wmSize             = 0x0005
 	wmCommand          = 0x0111
-	colorWindow        = 5 // COLOR_WINDOW
+	colorWindow        = 5  // COLOR_WINDOW
+	colorBtnFace       = 15 // COLOR_BTNFACE
 
 	mfString = 0x00000000
 	mfPopup  = 0x00000010
@@ -303,7 +304,7 @@ func main() {
 		lpfnWndProc:   syscall.NewCallback(wndProc),
 		hInstance:     syscall.Handle(hInstance),
 		hCursor:       syscall.Handle(cursor),
-		hbrBackground: syscall.Handle(colorWindow + 1),
+		hbrBackground: syscall.Handle(colorBtnFace + 1),
 		lpszClassName: className,
 	}
 	wc.cbSize = uint32(unsafe.Sizeof(wc))
