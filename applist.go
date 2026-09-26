@@ -72,7 +72,21 @@ const (
 	buttonHeight     = 24
 	buttonWidth      = 90
 	buttonGap        = 8
+
+	processQueryLimitedInformation = 0x1000
+	shgfiIcon                      = 0x000000100
+	shgfiSmallIcon                 = 0x000000001
+	shgfiUseFileAttributes         = 0x000000010
 )
+
+// shFileInfoW mirrors SHFILEINFOW from shellapi.h
+type shFileInfoW struct {
+	hIcon         syscall.Handle
+	iIcon         int32
+	dwAttributes  uint32
+	szDisplayName [260]uint16
+	szTypeName    [80]uint16
+}
 
 // lvColumnW mirrors LVCOLUMNW; field order/alignment must match the Win32 struct.
 type lvColumnW struct {
@@ -170,6 +184,14 @@ var (
 	procGetOpenFileNameW = comdlg32.NewProc("GetOpenFileNameW")
 	shell32              = syscall.NewLazyDLL("shell32.dll")
 	procShellExecuteW    = shell32.NewProc("ShellExecuteW")
+
+	procOpenProcess                = kernel32.NewProc("OpenProcess")
+	procCloseHandle                = kernel32.NewProc("CloseHandle")
+	procQueryFullProcessImageNameW = kernel32.NewProc("QueryFullProcessImageNameW")
+	procGetWindowThreadProcessId   = user32.NewProc("GetWindowThreadProcessId")
+	procFindWindowExW              = user32.NewProc("FindWindowExW")
+	procLoadIconW                  = user32.NewProc("LoadIconW")
+	procSHGetFileInfoW             = shell32.NewProc("SHGetFileInfoW")
 
 	// appMainHwnd is excluded from the enumerated list so the app doesn't list itself.
 	appMainHwnd  syscall.Handle
@@ -419,49 +441,6 @@ func insertAppRow(index int32, title string, iconIndex int32) {
 		pszText:  statusPtr,
 	}
 	procSendMessage.Call(uintptr(hwndAppList), lvmSetItemW, 0, uintptr(unsafe.Pointer(&status)))
-}
-
-// getWindowIcon fetches a window's own small icon (matching what the taskbar/alt-tab
-// would show), falling back through WM_GETICON variants, the window class icon, and
-// finally a generic stock icon if the app exposes none.
-func getWindowIcon(hwnd syscall.Handle) syscall.Handle {
-	tryMessage := func(wParam uintptr) syscall.Handle {
-		var result uintptr
-		ret, ok := safeCall(procSendMessageTimeout, uintptr(hwnd), wmGeticon, wParam, 0, smtoAbortIfHung, 100, uintptr(unsafe.Pointer(&result)))
-		if ok && ret != 0 && result != 0 {
-			return syscall.Handle(result)
-		}
-		return 0
-	}
-	if h := tryMessage(iconSmall2); h != 0 {
-		return h
-	}
-	if h := tryMessage(iconSmall); h != 0 {
-		return h
-	}
-	if h := tryMessage(iconBig); h != 0 {
-		return h
-	}
-
-	tryClassIcon := func(index int32) syscall.Handle {
-		h, ok := safeCall(procGetClassLongPtrW, uintptr(hwnd), uintptr(index))
-		if !ok {
-			return 0
-		}
-		return syscall.Handle(h)
-	}
-	if h := tryClassIcon(gclpHiconsm); h != 0 {
-		return h
-	}
-	if h := tryClassIcon(gclpHicon); h != 0 {
-		return h
-	}
-
-	if fallbackIcon == 0 {
-		h, _, _ := procLoadIcon.Call(0, uintptr(32512))
-		fallbackIcon = syscall.Handle(h)
-	}
-	return fallbackIcon
 }
 
 // endSelectedTask asks the selected window to close, like Task Manager's End Task.
