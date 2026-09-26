@@ -42,6 +42,9 @@ const (
 	wmSetFont              = 0x0030
 	wmNotify               = 0x004E
 	wmTimer                = 0x0113
+	wmCtlColorBtn          = 0x0135
+	wmCtlColorStatic       = 0x0138
+	transparentBkMode      = 1
 	spiGetNonClientMetrics = 0x0029
 
 	tabPadding = 6
@@ -186,8 +189,10 @@ var (
 	procLoadIcon             = user32.NewProc("LoadIconW")
 	procGetSystemDirectory   = kernel32.NewProc("GetSystemDirectoryW")
 	procExtractIcon          = shell32.NewProc("ExtractIconW")
+	procGetSysColorBrush     = user32.NewProc("GetSysColorBrush")
 	gdi32                    = syscall.NewLazyDLL("gdi32.dll")
 	procCreateFontIndirect   = gdi32.NewProc("CreateFontIndirectW")
+	procSetBkMode            = gdi32.NewProc("SetBkMode")
 )
 
 // hwndTab and hwndStatus are set once in main and read by wndProc for layout.
@@ -220,6 +225,12 @@ func wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr) (resul
 		refreshAppList()
 		refreshProcList()
 		return 0
+	case wmCtlColorBtn, wmCtlColorStatic:
+		// Without this, checkbox/static label text paints an opaque white rectangle
+		// behind it that doesn't match the window's COLOR_BTNFACE background.
+		procSetBkMode.Call(wParam, transparentBkMode)
+		brush, _, _ := procGetSysColorBrush.Call(colorBtnFace)
+		return brush
 	case wmNotify:
 		// Reinterpret via &lParam (a real *uintptr) rather than unsafe.Pointer(lParam)
 		// directly, since the latter looks like a fabricated pointer to vet's unsafeptr check.

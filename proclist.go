@@ -25,7 +25,8 @@ const (
 	bmGetCheck     = 0x00F0
 	bstChecked     = 1
 
-	checkboxWidth = 220
+	checkboxWidth   = 220
+	checkboxLeftPad = 8
 
 	wmSetRedraw    = 0x000B
 	lvmGetTopIndex = lvmFirst + 39 // LVM_GETTOPINDEX
@@ -266,7 +267,7 @@ func layoutProcList() {
 	)
 
 	buttonY := buttonsTop + (buttonAreaHeight-buttonHeight)/2
-	procMoveWindow.Call(uintptr(hwndShowAllUsers), uintptr(area.left), uintptr(buttonY), uintptr(checkboxWidth), uintptr(buttonHeight), 1)
+	procMoveWindow.Call(uintptr(hwndShowAllUsers), uintptr(area.left+checkboxLeftPad), uintptr(buttonY), uintptr(checkboxWidth), uintptr(buttonHeight), 1)
 
 	x := area.right - buttonWidth - buttonGap
 	procMoveWindow.Call(uintptr(hwndEndProcess), uintptr(x), uintptr(buttonY), uintptr(buttonWidth), uintptr(buttonHeight), 1)
