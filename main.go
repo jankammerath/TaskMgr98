@@ -341,6 +341,13 @@ func logCrash(r interface{}) {
 	fmt.Fprintf(f, "panic: %v\n\n%s", r, debug.Stack())
 }
 
+// loadEmbeddedIcon loads the icon embedded via rsrc.syso (see build.ps1/build.sh);
+// rsrc assigns the icon group resource ID 1 when no manifest is passed to it.
+func loadEmbeddedIcon(hInstance uintptr) syscall.Handle {
+	h, _, _ := procLoadIcon.Call(hInstance, uintptr(1))
+	return syscall.Handle(h)
+}
+
 // loadTaskManagerIcon extracts the real Task Manager icon out of system32\taskmgr.exe,
 // so the window/taskbar show it instead of the generic stock application icon.
 func loadTaskManagerIcon() syscall.Handle {
@@ -385,8 +392,11 @@ func main() {
 
 	// IDC_ARROW cursor
 	cursor, _, _ := procLoadCursor.Call(0, uintptr(32512))
-	// Prefer the real Task Manager icon; fall back to the generic IDI_APPLICATION stock icon.
-	icon := uintptr(loadTaskManagerIcon())
+	// Prefer the icon embedded via rsrc.syso, then the real Task Manager icon, then the stock icon.
+	icon := uintptr(loadEmbeddedIcon(hInstance))
+	if icon == 0 {
+		icon = uintptr(loadTaskManagerIcon())
+	}
 	if icon == 0 {
 		icon, _, _ = procLoadIcon.Call(0, uintptr(32512))
 	}

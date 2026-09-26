@@ -91,7 +91,7 @@ func getUwpWindowIcon(hwnd syscall.Handle) syscall.Handle {
 	}
 
 	// IPropertyStore vtable: QueryInterface(0), AddRef(1), Release(2), GetCount(3), GetAt(4), GetValue(5), SetValue(6), Commit(7)
-	storeVtbl := *(**[8]uintptr)(unsafe.Pointer(pStore))
+	storeVtbl := *(**[8]uintptr)(unsafe.Pointer(&pStore))
 	releaseStore := func() {
 		syscall.SyscallN(storeVtbl[2], pStore)
 	}
@@ -111,7 +111,8 @@ func getUwpWindowIcon(hwnd syscall.Handle) syscall.Handle {
 	defer procPropVariantClear.Call(uintptr(unsafe.Pointer(&pv)))
 
 	// Construct shell:AppsFolder\<AppUserModelID>
-	aumidStr := syscall.UTF16ToString((*[1024]uint16)(unsafe.Pointer(pv.valPtr))[:])
+	strPtr := *(**[1024]uint16)(unsafe.Pointer(&pv.valPtr))
+	aumidStr := syscall.UTF16ToString(strPtr[:])
 	parsingName, _ := syscall.UTF16PtrFromString("shell:AppsFolder\\" + aumidStr)
 
 	var pImageFactory uintptr
@@ -126,7 +127,7 @@ func getUwpWindowIcon(hwnd syscall.Handle) syscall.Handle {
 	}
 
 	// IShellItemImageFactory vtable: QueryInterface(0), AddRef(1), Release(2), GetImage(3)
-	factoryVtbl := *(**[4]uintptr)(unsafe.Pointer(pImageFactory))
+	factoryVtbl := *(**[4]uintptr)(unsafe.Pointer(&pImageFactory))
 	defer syscall.SyscallN(factoryVtbl[2], pImageFactory)
 
 	// Request standard 16x16 / 32x32 small icon dimensions
