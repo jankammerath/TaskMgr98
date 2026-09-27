@@ -312,9 +312,7 @@ func wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr) (resul
 			procDestroyWindow.Call(uintptr(hwnd))
 			return 0
 		case idHelpAbout:
-			text, _ := syscall.UTF16PtrFromString("Task Manager 98")
-			caption, _ := syscall.UTF16PtrFromString("About")
-			procMessageBox.Call(uintptr(hwnd), uintptr(unsafe.Pointer(text)), uintptr(unsafe.Pointer(caption)), 0)
+			showAboutDialog(hwnd)
 			return 0
 		case idEndTask:
 			endSelectedTask()
