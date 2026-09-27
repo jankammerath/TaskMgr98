@@ -517,8 +517,10 @@ func drawBarMeter(hdc uintptr, rc rect, percent int, label string) {
 	meterTop := int32(4)
 	meterBottom := h - labelHeight
 	meterHeight := meterBottom - meterTop
-	meterLeft := int32(6)
-	meterRight := w - int32(6)
+	fullWidth := w - int32(12)
+	segWidth := (fullWidth * 7) / 10 // 30% narrower than the full available width
+	meterLeft := int32(6) + (fullWidth-segWidth)/2
+	meterRight := meterLeft + segWidth
 
 	// Draw segments in LED bar style
 	numSegments := int32(12)
