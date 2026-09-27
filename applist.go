@@ -398,9 +398,9 @@ func refreshAppList() {
 		return
 	}
 
-	var selectedHwnd syscall.Handle
-	if entry, ok := selectedEntry(); ok {
-		selectedHwnd = entry.hwnd
+	selectedHwnds := make(map[syscall.Handle]bool)
+	for _, h := range selectedTaskHwnds() {
+		selectedHwnds[h] = true
 	}
 
 	pendingEntries = pendingEntries[:0]
@@ -425,12 +425,9 @@ func refreshAppList() {
 	}
 	currentEntries = append(currentEntries[:0], pendingEntries...)
 
-	if selectedHwnd != 0 {
-		for i, entry := range currentEntries {
-			if entry.hwnd == selectedHwnd {
-				selectAppRow(i)
-				break
-			}
+	for i, entry := range currentEntries {
+		if selectedHwnds[entry.hwnd] {
+			selectAppRow(i)
 		}
 	}
 }
