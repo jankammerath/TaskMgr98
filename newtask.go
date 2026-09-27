@@ -120,7 +120,7 @@ func showNewTaskDialog(owner syscall.Handle) {
 		uintptr(unsafe.Pointer(editClass)),
 		0,
 		uintptr(wsChild|wsVisible|wsTabStop|esAutoHScroll),
-		64, 71, dlgW-64-20, 22,
+		64, 71, dlgW-64-28, 22,
 		uintptr(hwndNewTaskDlg), 0, hInstance, 0,
 	)
 	hwndNewTaskEdit = syscall.Handle(e)
@@ -138,9 +138,9 @@ func showNewTaskDialog(owner syscall.Handle) {
 		)
 	}
 	const bsDefPushButton = 0x00000001
-	makeButton("OK", idNewTaskOK, dlgW-16-80-88-88, bsDefPushButton)
-	makeButton("Cancel", idNewTaskCancel, dlgW-16-80-88, bsPushButton)
-	makeButton("Browse...", idNewTaskBrowse, dlgW-16-80, bsPushButton)
+	makeButton("OK", idNewTaskOK, dlgW-24-80-88-88, bsDefPushButton)
+	makeButton("Cancel", idNewTaskCancel, dlgW-24-80-88, bsPushButton)
+	makeButton("Browse...", idNewTaskBrowse, dlgW-24-80, bsPushButton)
 
 	if font := createMessageFont(); font != 0 {
 		procEnumChildWindows.Call(uintptr(hwndNewTaskDlg), perfFontCallback, font)
