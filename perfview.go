@@ -84,6 +84,9 @@ var (
 	procGetPerformanceInfo = psapiDll.NewProc("GetPerformanceInfo")
 	procGetSystemTimes     = kernel32.NewProc("GetSystemTimes")
 
+	procEnumChildWindows = user32.NewProc("EnumChildWindows")
+	perfFontCallback     = syscall.NewCallback(setPerfChildFontProc)
+
 	hwndPerfContainer syscall.Handle
 
 	// Group Boxes
@@ -241,6 +244,28 @@ func createPerfView(hwndParent syscall.Handle, hInstance uintptr) syscall.Handle
 	perfLabels.kernelNonpaged = makeStatic(hwndPerfContainer, "0", ssRight)
 
 	return hwndPerfContainer
+}
+
+// setPerfFonts applies font to the group boxes and value labels created in
+// createPerfView (the graph windows ignore WM_SETFONT and paint their own text).
+func setPerfFonts(font uintptr) {
+	if hwndPerfContainer == 0 || font == 0 {
+		return
+	}
+	procEnumChildWindows.Call(uintptr(hwndPerfContainer), perfFontCallback, font)
+}
+
+// setPerfChildFontProc is the EnumChildWindows callback that sends WM_SETFONT to
+// each perf tab child; see enumAppWindowsProc for why the local recover is required.
+func setPerfChildFontProc(hwnd syscall.Handle, lParam uintptr) (result uintptr) {
+	const enumContinue = 1
+	defer func() {
+		if recover() != nil {
+			result = enumContinue
+		}
+	}()
+	procSendMessage.Call(uintptr(hwnd), wmSetFont, lParam, 1)
+	return enumContinue
 }
 
 func layoutPerfView() {
