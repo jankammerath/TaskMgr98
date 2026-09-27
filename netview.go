@@ -75,13 +75,28 @@ type mibIfTable2 struct {
 type netAdapter struct {
 	luid      uint64
 	name      string
+	desc      string
 	linkSpeed uint64 // bits/sec
 	connected bool
-	prevIn    uint64
-	prevOut   uint64
 	havePrev  bool
-	utilBP    int   // current utilization in basis points (1/100 %)
-	history   []int // utilization history in basis points
+
+	// cumulative counters and per-interval deltas
+	bytesSent, bytesRecv             uint64
+	sentDelta, recvDelta             uint64
+	ucastSent, ucastRecv             uint64
+	ucastSentDelta, ucastRecvDelta   uint64
+	nucastSent, nucastRecv           uint64
+	nucastSentDelta, nucastRecvDelta uint64
+
+	prevBytesSent, prevBytesRecv   uint64
+	prevUcastSent, prevUcastRecv   uint64
+	prevNucastSent, prevNucastRecv uint64
+
+	// utilization in basis points (1/100 %) plus per-direction histories
+	utilBP, sentBP, recvBP int
+	history                []int
+	sentHistory            []int
+	recvHistory            []int
 }
 
 var (
@@ -97,6 +112,11 @@ var (
 	netAdapters        []*netAdapter
 	netClassRegistered = false
 	netViewVisible     = false
+
+	// View > Network Adapter History line toggles
+	netShowBytesSent  = false // red
+	netShowBytesRecv  = false // yellow
+	netShowBytesTotal = true  // green
 )
 
 func registerNetGraphClass(hInstance uintptr) {
@@ -165,23 +185,8 @@ func createNetView(hwndParent syscall.Handle, hInstance uintptr) syscall.Handle 
 		uintptr(hwndNetContainer), idNetList, hInstance, 0,
 	)
 	hwndNetList = syscall.Handle(h)
-	procSendMessage.Call(uintptr(hwndNetList), lvmSetExtendedListViewStyle, 0, lvsExFullRowSelect)
-
-	addColumn := func(index int32, label string, width int32, format int32) {
-		text, _ := syscall.UTF16PtrFromString(label)
-		col := lvColumnW{
-			mask:     lvcfFmt | lvcfWidth | lvcfText | lvcfSubItem,
-			fmt:      format,
-			cx:       width,
-			pszText:  text,
-			iSubItem: index,
-		}
-		procSendMessage.Call(uintptr(hwndNetList), lvmInsertColumnW, uintptr(index), uintptr(unsafe.Pointer(&col)))
-	}
-	addColumn(0, "Adapter Name", 140, lvcfmtLeft)
-	addColumn(1, "Network Utilization", 110, lvcfmtRight)
-	addColumn(2, "Link Speed", 80, lvcfmtRight)
-	addColumn(3, "State", 110, lvcfmtLeft)
+	procSendMessage.Call(uintptr(hwndNetList), lvmSetExtendedListViewStyle, 0, lvsExFullRowSelect|lvsExHeaderDragDrop)
+	rebuildNetColumns()
 
 	return hwndNetContainer
 }
@@ -292,6 +297,7 @@ func refreshNetData() {
 		}
 
 		ad.name = syscall.UTF16ToString(row.alias[:])
+		ad.desc = syscall.UTF16ToString(row.description[:])
 		ad.connected = row.mediaConnectState == mediaConnected && row.operStatus == 1
 
 		speed := max(row.transmitLinkSpeed, row.receiveLinkSpeed)
@@ -300,20 +306,46 @@ func refreshNetData() {
 		}
 		ad.linkSpeed = speed
 
-		ad.utilBP = 0
-		if ad.havePrev && ad.connected && speed > 0 {
-			bits := (row.inOctets - ad.prevIn + row.outOctets - ad.prevOut) * 8
-			bp := bits * 10000 * 1000 / (speed * uint64(updateIntervalMs))
-			ad.utilBP = min(int(bp), 10000)
+		ad.sentDelta, ad.recvDelta = 0, 0
+		ad.ucastSentDelta, ad.ucastRecvDelta = 0, 0
+		ad.nucastSentDelta, ad.nucastRecvDelta = 0, 0
+		if ad.havePrev {
+			ad.sentDelta = row.outOctets - ad.prevBytesSent
+			ad.recvDelta = row.inOctets - ad.prevBytesRecv
+			ad.ucastSentDelta = row.outUcastPkts - ad.prevUcastSent
+			ad.ucastRecvDelta = row.inUcastPkts - ad.prevUcastRecv
+			ad.nucastSentDelta = row.outNUcastPkts - ad.prevNucastSent
+			ad.nucastRecvDelta = row.inNUcastPkts - ad.prevNucastRecv
 		}
-		ad.prevIn = row.inOctets
-		ad.prevOut = row.outOctets
+		ad.bytesSent, ad.bytesRecv = row.outOctets, row.inOctets
+		ad.ucastSent, ad.ucastRecv = row.outUcastPkts, row.inUcastPkts
+		ad.nucastSent, ad.nucastRecv = row.outNUcastPkts, row.inNUcastPkts
+
+		ad.utilBP, ad.sentBP, ad.recvBP = 0, 0, 0
+		if ad.havePrev && ad.connected && speed > 0 {
+			toBP := func(bytes uint64) int {
+				bp := bytes * 8 * 10000 * 1000 / (speed * uint64(updateIntervalMs))
+				return min(int(bp), 10000)
+			}
+			ad.sentBP = toBP(ad.sentDelta)
+			ad.recvBP = toBP(ad.recvDelta)
+			ad.utilBP = toBP(ad.sentDelta + ad.recvDelta)
+		}
+		ad.prevBytesSent, ad.prevBytesRecv = row.outOctets, row.inOctets
+		ad.prevUcastSent, ad.prevUcastRecv = row.outUcastPkts, row.inUcastPkts
+		ad.prevNucastSent, ad.prevNucastRecv = row.outNUcastPkts, row.inNUcastPkts
 		ad.havePrev = true
 
-		ad.history = append(ad.history, ad.utilBP)
-		if len(ad.history) > netHistoryMax {
-			ad.history = ad.history[1:]
+		appendHist := func(hist []int, v int) []int {
+			hist = append(hist, v)
+			if len(hist) > netHistoryMax {
+				hist = hist[1:]
+			}
+			return hist
 		}
+		ad.history = appendHist(ad.history, ad.utilBP)
+		ad.sentHistory = appendHist(ad.sentHistory, ad.sentBP)
+		ad.recvHistory = appendHist(ad.recvHistory, ad.recvBP)
 
 		next = append(next, ad)
 	}
@@ -345,23 +377,21 @@ func refreshNetData() {
 	}
 }
 
+// insertNetRow adds one row to the list view, filling every enabled column.
 func insertNetRow(index int32, ad *netAdapter) {
-	namePtr, _ := syscall.UTF16PtrFromString(ad.name)
-	item := lvItemW{mask: lvifText, iItem: index, pszText: namePtr}
+	cols := enabledNetColumns()
+	if len(cols) == 0 {
+		return
+	}
+	firstPtr, _ := syscall.UTF16PtrFromString(cols[0].value(ad))
+	item := lvItemW{mask: lvifText, iItem: index, pszText: firstPtr}
 	procSendMessage.Call(uintptr(hwndNetList), lvmInsertItemW, 0, uintptr(unsafe.Pointer(&item)))
 
-	setSubItem := func(sub int32, text string) {
-		ptr, _ := syscall.UTF16PtrFromString(text)
-		subItem := lvItemW{mask: lvifText, iItem: index, iSubItem: sub, pszText: ptr}
+	for sub := 1; sub < len(cols); sub++ {
+		ptr, _ := syscall.UTF16PtrFromString(cols[sub].value(ad))
+		subItem := lvItemW{mask: lvifText, iItem: index, iSubItem: int32(sub), pszText: ptr}
 		procSendMessage.Call(uintptr(hwndNetList), lvmSetItemW, 0, uintptr(unsafe.Pointer(&subItem)))
 	}
-	setSubItem(1, formatUtilBP(ad.utilBP))
-	setSubItem(2, formatLinkSpeed(ad.linkSpeed))
-	state := "Non Operational"
-	if ad.connected {
-		state = "Operational"
-	}
-	setSubItem(3, state)
 }
 
 func formatUtilBP(bp int) string {
@@ -455,10 +485,28 @@ func drawNetGraph(hdc uintptr, rc rect, ad *netAdapter) {
 		procLineTo.Call(hdc, uintptr(w), uintptr(y))
 	}
 
-	// Pick the smallest full-percent scale that fits the history's peak.
+	// Series toggled via View > Network Adapter History.
+	type series struct {
+		vals  []int
+		color uint32
+	}
+	var shown []series
+	if netShowBytesTotal {
+		shown = append(shown, series{ad.history, 0x0000FF00}) // green
+	}
+	if netShowBytesRecv {
+		shown = append(shown, series{ad.recvHistory, 0x0000FFFF}) // yellow
+	}
+	if netShowBytesSent {
+		shown = append(shown, series{ad.sentHistory, 0x000000FF}) // red
+	}
+
+	// Pick the smallest full-percent scale that fits the shown histories' peak.
 	peak := 0
-	for _, v := range ad.history {
-		peak = max(peak, v)
+	for _, s := range shown {
+		for _, v := range s.vals {
+			peak = max(peak, v)
+		}
 	}
 	scaleBP := 10000
 	for _, s := range []int{100, 200, 500, 1000, 2500, 5000, 10000} {
@@ -468,30 +516,33 @@ func drawNetGraph(hdc uintptr, rc rect, ad *netAdapter) {
 		}
 	}
 
-	// Bright green trend curve
-	trendPen, _, _ := procCreatePen.Call(psSolid, 1, 0x0000FF00)
-	procSelectObject.Call(hdc, trendPen)
+	for _, s := range shown {
+		trendPen, _, _ := procCreatePen.Call(psSolid, 1, uintptr(s.color))
+		procSelectObject.Call(hdc, trendPen)
 
-	count := len(ad.history)
-	for i := 0; i < count; i++ {
-		val := min(max(ad.history[count-1-i], 0), scaleBP)
+		count := len(s.vals)
+		for i := 0; i < count; i++ {
+			val := min(max(s.vals[count-1-i], 0), scaleBP)
 
-		x := (w - 1) - int32(i)*gridSpacing
-		if x < 0 {
-			break
+			x := (w - 1) - int32(i)*gridSpacing
+			if x < 0 {
+				break
+			}
+			y := (h - 1) - int32((int64(val)*int64(h-2))/int64(scaleBP))
+
+			if i == 0 {
+				procMoveToEx.Call(hdc, uintptr(x), uintptr(y), 0)
+			} else {
+				procLineTo.Call(hdc, uintptr(x), uintptr(y))
+			}
 		}
-		y := (h - 1) - int32((int64(val)*int64(h-2))/int64(scaleBP))
 
-		if i == 0 {
-			procMoveToEx.Call(hdc, uintptr(x), uintptr(y), 0)
-		} else {
-			procLineTo.Call(hdc, uintptr(x), uintptr(y))
-		}
+		procSelectObject.Call(hdc, oldPen)
+		procDeleteObject.Call(trendPen)
 	}
 
 	procSelectObject.Call(hdc, oldPen)
 	procDeleteObject.Call(gridPen)
-	procDeleteObject.Call(trendPen)
 
 	// Yellow y-axis labels overlaid on the chart's left edge
 	procSetBkMode.Call(hdc, 1) // TRANSPARENT

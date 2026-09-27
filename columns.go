@@ -215,11 +215,21 @@ func rebuildProcColumns() {
 	procSortAscending = true
 }
 
+// columnsDialogSpec parameterizes the shared "Select Columns" dialog.
+type columnsDialogSpec struct {
+	intro   string
+	labels  []string
+	checked []bool
+	locked  []bool
+	apply   func(states []bool)
+}
+
 var (
 	columnsClassRegistered = false
 	hwndColumnsDlg         syscall.Handle
 	columnsDlgOwner        syscall.Handle
 	columnsChecks          []syscall.Handle
+	columnsSpec            *columnsDialogSpec
 )
 
 func registerColumnsClass(hInstance uintptr) {
@@ -243,14 +253,37 @@ func registerColumnsClass(hInstance uintptr) {
 
 // showColumnsDialog opens the modal "Select Columns" dialog for the Processes tab.
 func showColumnsDialog(owner syscall.Handle) {
+	spec := &columnsDialogSpec{
+		intro:  "Select the columns that will appear on the Process page of the Task Manager.",
+		labels: procColumnLabels,
+	}
+	for _, c := range procColumns {
+		spec.checked = append(spec.checked, c.enabled)
+		spec.locked = append(spec.locked, c.locked)
+	}
+	spec.apply = func(states []bool) {
+		for i := range procColumns {
+			if !procColumns[i].locked {
+				procColumns[i].enabled = states[i]
+			}
+		}
+		rebuildProcColumns()
+		refreshProcList()
+	}
+	showSelectColumnsDialog(owner, spec)
+}
+
+// showSelectColumnsDialog opens the shared modal column picker described by spec.
+func showSelectColumnsDialog(owner syscall.Handle, spec *columnsDialogSpec) {
 	if hwndColumnsDlg != 0 {
 		procSetForegroundWindow.Call(uintptr(hwndColumnsDlg))
 		return
 	}
 	hInstance, _, _ := procGetModuleHandle.Call(0)
 	registerColumnsClass(hInstance)
+	columnsSpec = spec
 
-	rows := (len(procColumns) + 1) / 2
+	rows := (len(spec.labels) + 1) / 2
 	const rowH, topText = 22, 56
 	dlgW := int32(410)
 	dlgH := int32(topText) + int32(rows)*rowH + 96
@@ -278,7 +311,7 @@ func showColumnsDialog(owner syscall.Handle) {
 	columnsChecks = columnsChecks[:0]
 
 	stClass, _ := syscall.UTF16PtrFromString("STATIC")
-	intro, _ := syscall.UTF16PtrFromString("Select the columns that will appear on the Process page of the Task Manager.")
+	intro, _ := syscall.UTF16PtrFromString(spec.intro)
 	procCreateWindowEx.Call(
 		0,
 		uintptr(unsafe.Pointer(stClass)),
@@ -289,9 +322,9 @@ func showColumnsDialog(owner syscall.Handle) {
 	)
 
 	btnClass, _ := syscall.UTF16PtrFromString("BUTTON")
-	for i, c := range procColumns {
+	for i, labelText := range spec.labels {
 		style := uintptr(wsChild | wsVisible | wsTabStop | bsAutoCheckbox)
-		if c.locked {
+		if spec.locked[i] {
 			style |= wsDisabled
 		}
 		colX := int32(20)
@@ -299,7 +332,7 @@ func showColumnsDialog(owner syscall.Handle) {
 			colX = dlgW/2 + 4
 		}
 		cy := int32(topText) + int32(i%rows)*rowH
-		label, _ := syscall.UTF16PtrFromString(procColumnLabels[i])
+		label, _ := syscall.UTF16PtrFromString(labelText)
 		ch, _, _ := procCreateWindowEx.Call(
 			0,
 			uintptr(unsafe.Pointer(btnClass)),
@@ -309,7 +342,7 @@ func showColumnsDialog(owner syscall.Handle) {
 			uintptr(hwndColumnsDlg), 0, hInstance, 0,
 		)
 		check := syscall.Handle(ch)
-		if c.enabled {
+		if spec.checked[i] {
 			procSendMessage.Call(uintptr(check), bmSetCheck, bstChecked, 0)
 		}
 		columnsChecks = append(columnsChecks, check)
@@ -338,17 +371,16 @@ func showColumnsDialog(owner syscall.Handle) {
 	procUpdateWindow.Call(uintptr(hwndColumnsDlg))
 }
 
-// applyColumnsDialog copies the checkbox states into procColumns and rebuilds the list.
+// applyColumnsDialog hands the checkbox states to the active spec's apply callback.
 func applyColumnsDialog() {
+	states := make([]bool, len(columnsChecks))
 	for i, check := range columnsChecks {
-		if procColumns[i].locked {
-			continue
-		}
 		state, _, _ := procSendMessage.Call(uintptr(check), bmGetCheck, 0, 0)
-		procColumns[i].enabled = state == bstChecked
+		states[i] = state == bstChecked
 	}
-	rebuildProcColumns()
-	refreshProcList()
+	if columnsSpec != nil && columnsSpec.apply != nil {
+		columnsSpec.apply(states)
+	}
 }
 
 func closeColumnsDialog() {

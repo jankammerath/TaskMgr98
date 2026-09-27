@@ -83,6 +83,10 @@ const (
 	idViewCPUHistAll = 1022 // contiguous with per-CPU id for CheckMenuRadioItem
 	idViewCPUHistPer = 1023
 	idViewKernelTime = 1024
+	idViewNetSent    = 1025
+	idViewNetRecv    = 1026
+	idViewNetTotal   = 1027
+	idViewNetCols    = 1028
 	idAppListTimer   = 1
 	timerIntervalMs  = 1500
 
@@ -273,6 +277,8 @@ var (
 	procViewItemsShown bool
 	perfViewItemsShown bool
 	hCPUHistMenu       uintptr
+	netViewItemsShown  bool
+	hNetHistMenu       uintptr
 	appViewMode        = uintptr(idViewDetails) // Details is the startup default
 	minimizeOnUse      bool
 	hideWhenMinimized  bool
@@ -344,6 +350,7 @@ func wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr) (resul
 			updateWindowsMenu(hwnd, int32(sel) == 0)
 			updateProcViewMenu(int32(sel) == 1)
 			updatePerfViewMenu(int32(sel) == 2)
+			updateNetViewMenu(int32(sel) == 3)
 		case hdr.hwndFrom == hwndAppList && hdr.code == lvnColumnClick:
 			nmlv := *(**nmListView)(unsafe.Pointer(&lParam))
 			setAppSortColumn(nmlv.iSubItem)
@@ -440,6 +447,23 @@ func wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr) (resul
 			syncPerfViewMenuChecks()
 			procInvalidateRect.Call(uintptr(hwndCPUHist), 0, 0)
 			procInvalidateRect.Call(uintptr(hwndCPUMeter), 0, 0)
+			return 0
+		case idViewNetSent, idViewNetRecv, idViewNetTotal:
+			switch wParam & 0xFFFF {
+			case idViewNetSent:
+				netShowBytesSent = !netShowBytesSent
+			case idViewNetRecv:
+				netShowBytesRecv = !netShowBytesRecv
+			case idViewNetTotal:
+				netShowBytesTotal = !netShowBytesTotal
+			}
+			syncNetViewMenuChecks()
+			for _, g := range hwndNetGraphs {
+				procInvalidateRect.Call(uintptr(g), 0, 0)
+			}
+			return 0
+		case idViewNetCols:
+			showNetColumnsDialog(hwnd)
 			return 0
 		}
 	}
@@ -547,6 +571,59 @@ func updatePerfViewMenu(show bool) {
 		}
 	}
 	perfViewItemsShown = show
+}
+
+// updateNetViewMenu appends or removes the Networking-only items (separator,
+// Network Adapter History submenu, separator, Select Columns...) at positions 2-5.
+func updateNetViewMenu(show bool) {
+	if hViewMenu == 0 || show == netViewItemsShown {
+		return
+	}
+	if show {
+		if hNetHistMenu == 0 {
+			hNetHistMenu, _, _ = procCreatePopupMenu.Call()
+			for _, it := range []struct {
+				id   uintptr
+				text string
+			}{
+				{idViewNetSent, "Bytes Sent\t(Red)"},
+				{idViewNetRecv, "Bytes Received\t(Yellow)"},
+				{idViewNetTotal, "Bytes Total\t(Green)"},
+			} {
+				t, _ := syscall.UTF16PtrFromString(it.text)
+				procAppendMenu.Call(hNetHistMenu, mfString, it.id, uintptr(unsafe.Pointer(t)))
+			}
+		}
+		procAppendMenu.Call(hViewMenu, mfSeparator, 0, 0)
+		histLabel, _ := syscall.UTF16PtrFromString("Network Adapter History")
+		procAppendMenu.Call(hViewMenu, mfPopup, hNetHistMenu, uintptr(unsafe.Pointer(histLabel)))
+		procAppendMenu.Call(hViewMenu, mfSeparator, 0, 0)
+		colsLabel, _ := syscall.UTF16PtrFromString("Select Columns...")
+		procAppendMenu.Call(hViewMenu, mfString, idViewNetCols, uintptr(unsafe.Pointer(colsLabel)))
+		syncNetViewMenuChecks()
+	} else {
+		for pos := 5; pos >= 2; pos-- {
+			procRemoveMenu.Call(hViewMenu, uintptr(pos), mfByPosition)
+		}
+	}
+	netViewItemsShown = show
+}
+
+// syncNetViewMenuChecks reflects the graph line toggles in the submenu.
+func syncNetViewMenuChecks() {
+	if hNetHistMenu == 0 {
+		return
+	}
+	check := func(id uintptr, on bool) {
+		flags := uintptr(0)
+		if on {
+			flags = mfChecked
+		}
+		procCheckMenuItem.Call(hNetHistMenu, id, flags)
+	}
+	check(idViewNetSent, netShowBytesSent)
+	check(idViewNetRecv, netShowBytesRecv)
+	check(idViewNetTotal, netShowBytesTotal)
 }
 
 // syncPerfViewMenuChecks moves the CPU History radio and Show Kernel Times check.
