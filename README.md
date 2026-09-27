@@ -5,6 +5,7 @@ Rewrite of the classic Windows 98, NT4 and Windows XP Task Manager for Windows 1
 ![Applications](doc/applist.jpg)
 ![Processes](doc/proclist.jpg)
 ![Performance](doc/perfview.jpg)
+![Networking](doc/netview.jpg)
 
 ## Status
 
