@@ -40,6 +40,7 @@ const (
 	sbarsSizeGrip = 0x0100
 
 	wmSetFont              = 0x0030
+	wmGetMinMaxInfo        = 0x0024
 	wmNotify               = 0x004E
 	wmTimer                = 0x0113
 	wmCtlColorBtn          = 0x0135
@@ -48,6 +49,9 @@ const (
 	spiGetNonClientMetrics = 0x0029
 
 	tabPadding = 6
+
+	minWindowWidth  = 370
+	minWindowHeight = 480
 
 	idTab           = 100
 	idStatus        = 101
@@ -84,6 +88,15 @@ type msg struct {
 }
 
 type rect struct{ left, top, right, bottom int32 }
+
+// minMaxInfo mirrors MINMAXINFO for enforcing a minimum window size on WM_GETMINMAXINFO.
+type minMaxInfo struct {
+	ptReserved     point
+	ptMaxSize      point
+	ptMaxPosition  point
+	ptMinTrackSize point
+	ptMaxTrackSize point
+}
 
 // nmhdr mirrors NMHDR for reading WM_NOTIFY codes off lParam.
 type nmhdr struct {
@@ -222,6 +235,10 @@ func wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr) (resul
 		return 0
 	case wmSize:
 		layoutChildren(hwnd)
+		return 0
+	case wmGetMinMaxInfo:
+		mmi := *(**minMaxInfo)(unsafe.Pointer(&lParam))
+		mmi.ptMinTrackSize = point{x: minWindowWidth, y: minWindowHeight}
 		return 0
 	case wmTimer:
 		refreshAppList()
