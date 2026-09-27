@@ -22,9 +22,10 @@ const (
 	colorWindow        = 5  // COLOR_WINDOW
 	colorBtnFace       = 15 // COLOR_BTNFACE
 
-	mfString    = 0x00000000
-	mfPopup     = 0x00000010
-	mfSeparator = 0x00000800
+	mfString     = 0x00000000
+	mfPopup      = 0x00000010
+	mfSeparator  = 0x00000800
+	mfByPosition = 0x00000400
 
 	iccTabClasses      = 0x00000008
 	iccBarClasses      = 0x00000004
@@ -69,8 +70,15 @@ const (
 	idViewSpeedNorm  = 1009
 	idViewSpeedLow   = 1010
 	idViewSpeedPause = 1011
+	idViewLargeIcons = 1012 // view mode ids must stay contiguous too
+	idViewSmallIcons = 1013
+	idViewDetails    = 1014
 	idAppListTimer   = 1
 	timerIntervalMs  = 1500
+
+	lvsTypeMask  = 0x0003
+	lvsIcon      = 0x0000
+	lvsSmallIcon = 0x0002
 
 	swMinimize    = 6
 	sizeMinimized = 1 // WM_SIZE wParam
@@ -226,6 +234,8 @@ var (
 	procCheckMenuItem      = user32.NewProc("CheckMenuItem")
 	procCheckMenuRadioItem = user32.NewProc("CheckMenuRadioItem")
 	procKillTimer          = user32.NewProc("KillTimer")
+	procSetWindowLongW     = user32.NewProc("SetWindowLongW")
+	procRemoveMenu         = user32.NewProc("RemoveMenu")
 )
 
 // hwndTab and hwndStatus are set once in main and read by wndProc for layout.
@@ -234,6 +244,9 @@ var (
 	hwndStatus syscall.Handle
 
 	hMainMenu         uintptr
+	hViewMenu         uintptr
+	appViewItemsShown bool
+	appViewMode       = uintptr(idViewDetails) // Details is the startup default
 	minimizeOnUse     bool
 	hideWhenMinimized bool
 	updateIntervalMs  = timerIntervalMs // last non-paused timer interval
@@ -300,6 +313,7 @@ func wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr) (resul
 			showProcList(int32(sel) == 1)
 			showPerfView(int32(sel) == 2)
 			showNetView(int32(sel) == 3)
+			updateAppViewMenu(int32(sel) == 0)
 		case hdr.hwndFrom == hwndAppList && hdr.code == lvnColumnClick:
 			nmlv := *(**nmListView)(unsafe.Pointer(&lParam))
 			setAppSortColumn(nmlv.iSubItem)
@@ -372,6 +386,9 @@ func wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr) (resul
 		case idViewSpeedPause:
 			setUpdateSpeed(hwnd, 0, idViewSpeedPause)
 			return 0
+		case idViewLargeIcons, idViewSmallIcons, idViewDetails:
+			setAppViewMode(wParam & 0xFFFF)
+			return 0
 		}
 	}
 	ret, _, _ := procDefWindowProc.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
@@ -402,6 +419,60 @@ func setUpdateSpeed(hwnd syscall.Handle, ms int, id uintptr) {
 	if hMainMenu != 0 {
 		procCheckMenuRadioItem.Call(hMainMenu, idViewSpeedHigh, idViewSpeedPause, id, 0) // MF_BYCOMMAND
 	}
+}
+
+// updateAppViewMenu appends or removes the Applications-only view mode items,
+// which sit at fixed positions 2-5 after "Refresh Now" and "Update Speed".
+func updateAppViewMenu(show bool) {
+	if hViewMenu == 0 || show == appViewItemsShown {
+		return
+	}
+	if show {
+		procAppendMenu.Call(hViewMenu, mfSeparator, 0, 0)
+		for _, it := range []struct {
+			id   uintptr
+			text string
+		}{
+			{idViewLargeIcons, "Large Icons"},
+			{idViewSmallIcons, "Small Icons"},
+			{idViewDetails, "Details"},
+		} {
+			t, _ := syscall.UTF16PtrFromString(it.text)
+			procAppendMenu.Call(hViewMenu, mfString, it.id, uintptr(unsafe.Pointer(t)))
+		}
+		procCheckMenuRadioItem.Call(hMainMenu, idViewLargeIcons, idViewDetails, appViewMode, 0)
+	} else {
+		for pos := 5; pos >= 2; pos-- {
+			procRemoveMenu.Call(hViewMenu, uintptr(pos), mfByPosition)
+		}
+	}
+	appViewItemsShown = show
+}
+
+// setAppViewMode switches the Applications list between icon/small icon/report view.
+func setAppViewMode(id uintptr) {
+	if hwndAppList == 0 {
+		return
+	}
+	style := uintptr(lvsIcon)
+	switch id {
+	case idViewSmallIcons:
+		style = lvsSmallIcon
+	case idViewDetails:
+		style = lvsReport
+	}
+	if id == idViewLargeIcons {
+		// Large icon view draws from LVSIL_NORMAL (0), so mirror the small image list there.
+		procSendMessage.Call(uintptr(hwndAppList), lvmSetImageList, 0, uintptr(appImageList))
+	}
+	gwlStyle := ^uintptr(15) // GWL_STYLE (-16)
+	cur, _, _ := procGetWindowLongW.Call(uintptr(hwndAppList), gwlStyle)
+	procSetWindowLongW.Call(uintptr(hwndAppList), gwlStyle, (cur&^uintptr(lvsTypeMask))|style)
+	appViewMode = id
+	if hMainMenu != 0 {
+		procCheckMenuRadioItem.Call(hMainMenu, idViewLargeIcons, idViewDetails, id, 0)
+	}
+	refreshAppList()
 }
 
 // layoutChildren positions the tab control to fill the client area above the status bar.
@@ -507,6 +578,7 @@ func createMenuBar(hwnd syscall.Handle) {
 	}
 	speedLabel, _ := syscall.UTF16PtrFromString("Update Speed")
 	procAppendMenu.Call(viewPopup, mfPopup, speedPopup, uintptr(unsafe.Pointer(speedLabel)))
+	hViewMenu = viewPopup
 
 	addPopup("Help",
 		menuItem{idHelpLink, "Task Manager 98 Help Topics"},
@@ -515,6 +587,7 @@ func createMenuBar(hwnd syscall.Handle) {
 
 	hMainMenu = hMenuBar
 	procCheckMenuRadioItem.Call(hMainMenu, idViewSpeedHigh, idViewSpeedPause, idViewSpeedNorm, 0)
+	updateAppViewMenu(true) // Applications is the startup tab
 	procSetMenu.Call(uintptr(hwnd), hMenuBar)
 }
 
