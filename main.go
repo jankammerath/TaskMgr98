@@ -367,7 +367,7 @@ func createMenuBar(hwnd syscall.Handle) {
 		procAppendMenu.Call(hMenuBar, mfPopup, hPopup, uintptr(unsafe.Pointer(labelText)))
 	}
 
-	addPopup("File", menuItem{idFileExit, "Exit"})
+	addPopup("File", menuItem{idFileExit, "Exit Task Manager 98"})
 	addPopup("Options")
 	addPopup("View")
 	addPopup("Help", menuItem{idHelpAbout, "About"})
