@@ -531,6 +531,9 @@ func drawBarMeter(hdc uintptr, rc rect, percent int, label string) {
 
 	litBrush, _, _ := procCreateSolidBrush.Call(0x0000E000)  // Bright Green
 	darkBrush, _, _ := procCreateSolidBrush.Call(0x00003000) // Faint Green
+	sepBrush, _, _ := procCreateSolidBrush.Call(0x00000000)  // Black separator
+
+	sepX := meterLeft + (meterRight-meterLeft)/2
 
 	for i := int32(0); i < numSegments; i++ {
 		// Index 0 is bottom-most segment
@@ -543,10 +546,15 @@ func drawBarMeter(hdc uintptr, rc rect, percent int, label string) {
 		} else {
 			procFillRect.Call(hdc, uintptr(unsafe.Pointer(&segRect)), darkBrush)
 		}
+
+		// Split segment into left/right LED halves
+		sepRect := rect{left: sepX - 1, top: segY1, right: sepX + 1, bottom: segY2}
+		procFillRect.Call(hdc, uintptr(unsafe.Pointer(&sepRect)), sepBrush)
 	}
 
 	procDeleteObject.Call(litBrush)
 	procDeleteObject.Call(darkBrush)
+	procDeleteObject.Call(sepBrush)
 
 	// Draw percentage/MB label at bottom
 	procSetBkMode.Call(hdc, 1) // TRANSPARENT
