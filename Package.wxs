@@ -16,7 +16,7 @@
     <MajorUpgrade DowngradeErrorMessage="A newer version of Task Manager 98 is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
-    <Icon Id="AppIcon.ico" SourceFile="media/icon.ico" />
+    <Icon Id="AppIcon.ico" SourceFile="$(var.IconPath)" />
     <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
 
     <StandardDirectory Id="ProgramFiles64Folder">
