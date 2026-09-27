@@ -90,6 +90,7 @@ var (
 	procFillRect               = user32.NewProc("FillRect")
 	procSetTextColor           = gdi32.NewProc("SetTextColor")
 	procDrawTextW              = user32.NewProc("DrawTextW")
+	procDrawEdge               = user32.NewProc("DrawEdge")
 
 	psapiDll               = syscall.NewLazyDLL("psapi.dll")
 	procGetPerformanceInfo = psapiDll.NewProc("GetPerformanceInfo")
@@ -207,9 +208,9 @@ func createPerfView(hwndParent syscall.Handle, hInstance uintptr) syscall.Handle
 	hwndGrpKernel = makeGroup("Kernel Memory (K)")
 
 	graphClass, _ := syscall.UTF16PtrFromString("TaskMgr98PerfGraph")
-	makeGraph := func(id uintptr) syscall.Handle {
+	makeGraph := func(id, exStyle uintptr) syscall.Handle {
 		h, _, _ := procCreateWindowEx.Call(
-			0x00000200, // WS_EX_CLIENTEDGE
+			exStyle,
 			uintptr(unsafe.Pointer(graphClass)),
 			0,
 			uintptr(wsChild|wsVisible),
@@ -219,10 +220,11 @@ func createPerfView(hwndParent syscall.Handle, hInstance uintptr) syscall.Handle
 		return syscall.Handle(h)
 	}
 
-	hwndCPUMeter = makeGraph(1)
-	hwndCPUHist = makeGraph(2)
-	hwndPFMeter = makeGraph(3)
-	hwndPFHist = makeGraph(4)
+	const wsExClientEdge = 0x00000200
+	hwndCPUMeter = makeGraph(1, wsExClientEdge)
+	hwndCPUHist = makeGraph(2, 0) // draws its own per-panel sunken frames
+	hwndPFMeter = makeGraph(3, wsExClientEdge)
+	hwndPFHist = makeGraph(4, wsExClientEdge)
 
 	makeStatic := func(parent syscall.Handle, text string, align uint32) syscall.Handle {
 		stClass, _ := syscall.UTF16PtrFromString("STATIC")
@@ -561,17 +563,28 @@ func perfGraphWndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintpt
 		case 1: // CPU Bar Meter
 			drawBarMeter(memDC, rc, currentCPUUsage, currentKernelUsage, fmt.Sprintf("%d %%", currentCPUUsage))
 		case 2: // CPU History Chart(s)
+			drawFramed := func(sub rect, vals, kvals []int) {
+				procDrawEdge.Call(memDC, uintptr(unsafe.Pointer(&sub)), 0x000A, 0x000F) // EDGE_SUNKEN, BF_RECT
+				inner := rect{left: sub.left + 2, top: sub.top + 2, right: sub.right - 2, bottom: sub.bottom - 2}
+				panelBrush, _, _ := procCreateSolidBrush.Call(0x00000000)
+				procFillRect.Call(memDC, uintptr(unsafe.Pointer(&inner)), panelBrush)
+				procDeleteObject.Call(panelBrush)
+				drawHistoryGraph(memDC, inner, vals, kvals, 0x0000FF00)
+			}
+
 			n := len(cpuHistories)
 			if cpuHistoryPerCPU && n > 1 {
-				gap := int32(4)
+				// Gray gaps between the per-CPU panels, each with its own sunken frame.
+				gap := int32(8)
+				bgBrush, _, _ := procGetSysColorBrush.Call(colorBtnFace)
+				procFillRect.Call(memDC, uintptr(unsafe.Pointer(&rc)), bgBrush)
 				subW := (w - gap*int32(n-1)) / int32(n)
 				for i := 0; i < n; i++ {
 					left := int32(i) * (subW + gap)
-					sub := rect{left: left, top: 0, right: left + subW, bottom: h}
-					drawHistoryGraph(memDC, sub, cpuHistories[i], kernelHistories[i], 0x0000FF00)
+					drawFramed(rect{left: left, top: 0, right: left + subW, bottom: h}, cpuHistories[i], kernelHistories[i])
 				}
 			} else {
-				drawHistoryGraph(memDC, rc, cpuHistory, kernelHistory, 0x0000FF00)
+				drawFramed(rc, cpuHistory, kernelHistory)
 			}
 		case 3: // PF Bar Meter
 			pfPct := 0
