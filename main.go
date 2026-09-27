@@ -446,7 +446,7 @@ func createMenuBar(hwnd syscall.Handle) {
 		menuItem{idOptMinimizeUse, "Minimize On Use"},
 		menuItem{idOptHideWhenMin, "Hide When Minimized"})
 	addPopup("View")
-	addPopup("Help", menuItem{idHelpAbout, "About"})
+	addPopup("Help", menuItem{idHelpAbout, "About Task Manager 98"})
 
 	hMainMenu = hMenuBar
 	procSetMenu.Call(uintptr(hwnd), hMenuBar)
