@@ -575,7 +575,7 @@ func perfGraphWndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintpt
 			n := len(cpuHistories)
 			if cpuHistoryPerCPU && n > 1 {
 				// Gray gaps between the per-CPU panels, each with its own sunken frame.
-				gap := int32(8)
+				gap := int32(4)
 				bgBrush, _, _ := procGetSysColorBrush.Call(colorBtnFace)
 				procFillRect.Call(memDC, uintptr(unsafe.Pointer(&rc)), bgBrush)
 				subW := (w - gap*int32(n-1)) / int32(n)
