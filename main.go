@@ -315,6 +315,11 @@ func wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr) (resul
 		case idHelpAbout:
 			showAboutDialog(hwnd)
 			return 0
+		case idHelpLink:
+			url, _ := syscall.UTF16PtrFromString("https://github.com/jankammerath/TaskMgr98")
+			openVerb, _ := syscall.UTF16PtrFromString("open")
+			procShellExecuteW.Call(0, uintptr(unsafe.Pointer(openVerb)), uintptr(unsafe.Pointer(url)), 0, 0, swShowDefault)
+			return 0
 		case idEndTask:
 			endSelectedTask()
 			return 0
