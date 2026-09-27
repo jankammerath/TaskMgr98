@@ -12,6 +12,10 @@ const (
 	maxNetGraphs  = 4
 	netHistoryMax = 300
 
+	netTitleHeight    = 18
+	netAxisWidth      = 36
+	netChartMaxHeight = 160
+
 	lvcfmtRight = 1
 
 	ifTypeLoopback        = 24
@@ -89,6 +93,8 @@ var (
 	procGetIfTable2  = iphlpapi.NewProc("GetIfTable2")
 	procFreeMibTable = iphlpapi.NewProc("FreeMibTable")
 
+	procDrawEdge = user32.NewProc("DrawEdge")
+
 	hwndNetContainer syscall.Handle
 	hwndNetList      syscall.Handle
 	hwndNetGraphs    [maxNetGraphs]syscall.Handle
@@ -133,7 +139,7 @@ func createNetView(hwndParent syscall.Handle, hInstance uintptr) syscall.Handle 
 	graphClass, _ := syscall.UTF16PtrFromString("TaskMgr98NetGraph")
 	for i := 0; i < maxNetGraphs; i++ {
 		h, _, _ := procCreateWindowEx.Call(
-			0x00000200, // WS_EX_CLIENTEDGE
+			0,
 			uintptr(unsafe.Pointer(graphClass)),
 			0,
 			uintptr(wsChild),
@@ -204,6 +210,10 @@ func layoutNetView() {
 	}
 	if n > 0 {
 		graphH := (h - listH - pad*(n+2)) / n
+		maxGraphH := int32(netTitleHeight + netChartMaxHeight + 4)
+		if graphH > maxGraphH {
+			graphH = maxGraphH
+		}
 		y := pad
 		for i := int32(0); i < n; i++ {
 			procMoveWindow.Call(uintptr(hwndNetGraphs[i]), uintptr(pad), uintptr(y), uintptr(w-pad*2), uintptr(graphH), 1)
@@ -395,9 +405,9 @@ func netGraphWndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr
 		memBmp, _, _ := procCreateCompatibleBitmap.Call(hdc, uintptr(w), uintptr(h))
 		oldBmp, _, _ := procSelectObject.Call(memDC, memBmp)
 
-		blackBrush, _, _ := procCreateSolidBrush.Call(0x00000000)
-		procFillRect.Call(memDC, uintptr(unsafe.Pointer(&rc)), blackBrush)
-		procDeleteObject.Call(blackBrush)
+		// Dialog background; the black chart area is painted by drawNetGraph.
+		bgBrush, _, _ := procGetSysColorBrush.Call(colorBtnFace)
+		procFillRect.Call(memDC, uintptr(unsafe.Pointer(&rc)), bgBrush)
 
 		id, _, _ := procGetWindowLongW.Call(uintptr(hwnd), ^uintptr(11)) // GWL_ID (-12)
 		idx := int(id) - 1
@@ -422,18 +432,32 @@ func drawNetGraph(hdc uintptr, rc rect, ad *netAdapter) {
 	w := rc.right - rc.left
 	h := rc.bottom - rc.top
 
+	// Chart area: below the title, right of the y-axis gutter, capped at 160px tall.
+	chart := rect{left: netAxisWidth, top: netTitleHeight, right: w - 2, bottom: h - 2}
+	if chart.bottom-chart.top > netChartMaxHeight {
+		chart.bottom = chart.top + netChartMaxHeight
+	}
+	if chart.right <= chart.left || chart.bottom <= chart.top {
+		return
+	}
+	chartH := chart.bottom - chart.top
+
+	blackBrush, _, _ := procCreateSolidBrush.Call(0x00000000)
+	procFillRect.Call(hdc, uintptr(unsafe.Pointer(&chart)), blackBrush)
+	procDeleteObject.Call(blackBrush)
+
 	// Dark green grid
 	gridPen, _, _ := procCreatePen.Call(psSolid, 1, 0x00005500)
 	oldPen, _, _ := procSelectObject.Call(hdc, gridPen)
 
 	gridSpacing := int32(12)
-	for x := w - 1; x >= 0; x -= gridSpacing {
-		procMoveToEx.Call(hdc, uintptr(x), 0, 0)
-		procLineTo.Call(hdc, uintptr(x), uintptr(h))
+	for x := chart.right - 1; x >= chart.left; x -= gridSpacing {
+		procMoveToEx.Call(hdc, uintptr(x), uintptr(chart.top), 0)
+		procLineTo.Call(hdc, uintptr(x), uintptr(chart.bottom))
 	}
-	for y := h - 1; y >= 0; y -= gridSpacing {
-		procMoveToEx.Call(hdc, uintptr(0), uintptr(y), 0)
-		procLineTo.Call(hdc, uintptr(w), uintptr(y))
+	for y := chart.bottom - 1; y >= chart.top; y -= gridSpacing {
+		procMoveToEx.Call(hdc, uintptr(chart.left), uintptr(y), 0)
+		procLineTo.Call(hdc, uintptr(chart.right), uintptr(y))
 	}
 
 	// Pick the smallest full-percent scale that fits the history's peak.
@@ -457,11 +481,11 @@ func drawNetGraph(hdc uintptr, rc rect, ad *netAdapter) {
 	for i := 0; i < count; i++ {
 		val := min(max(ad.history[count-1-i], 0), scaleBP)
 
-		x := (w - 1) - int32(i)*gridSpacing
-		if x < 0 {
+		x := (chart.right - 1) - int32(i)*gridSpacing
+		if x < chart.left {
 			break
 		}
-		y := (h - 1) - int32((int64(val)*int64(h-2))/int64(scaleBP))
+		y := (chart.bottom - 1) - int32((int64(val)*int64(chartH-2))/int64(scaleBP))
 
 		if i == 0 {
 			procMoveToEx.Call(hdc, uintptr(x), uintptr(y), 0)
@@ -474,7 +498,11 @@ func drawNetGraph(hdc uintptr, rc rect, ad *netAdapter) {
 	procDeleteObject.Call(gridPen)
 	procDeleteObject.Call(trendPen)
 
-	// Adapter title (cyan) and y-axis scale labels (yellow)
+	// Sunken frame around the chart
+	frame := rect{left: chart.left - 2, top: chart.top - 2, right: chart.right + 2, bottom: chart.bottom + 2}
+	procDrawEdge.Call(hdc, uintptr(unsafe.Pointer(&frame)), 0x000A, 0x000F) // EDGE_SUNKEN, BF_RECT
+
+	// Title (blue) above the chart, y-axis scale labels (black) in the left gutter
 	procSetBkMode.Call(hdc, 1) // TRANSPARENT
 	labelFont := logFont{lfHeight: -11, lfWeight: 400}
 	faceName, _ := syscall.UTF16FromString("Segoe UI")
@@ -487,12 +515,20 @@ func drawNetGraph(hdc uintptr, rc rect, ad *netAdapter) {
 		procDrawTextW.Call(hdc, uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)-1), uintptr(unsafe.Pointer(&r)), flags|0x20) // DT_SINGLELINE
 	}
 
-	procSetTextColor.Call(hdc, 0x00FFFF00)                               // Cyan
-	drawText(ad.name, rect{left: 0, top: 2, right: w, bottom: 16}, 0x01) // DT_CENTER
+	procSetTextColor.Call(hdc, 0x00FF0000) // Blue
+	drawText(ad.name, rect{left: 2, top: 1, right: w, bottom: netTitleHeight - 2}, 0)
 
-	procSetTextColor.Call(hdc, 0x0000FFFF) // Yellow
-	drawText(fmt.Sprintf("%d %%", scaleBP/100), rect{left: 3, top: 2, right: 60, bottom: 16}, 0)
-	drawText("0 %", rect{left: 3, top: h - 15, right: 60, bottom: h - 1}, 0)
+	procSetTextColor.Call(hdc, 0x00000000) // Black
+	axisLabel := func(bp int, y int32) {
+		text := fmt.Sprintf("%d %%", bp/100)
+		if bp%100 != 0 {
+			text = fmt.Sprintf("%d.%d %%", bp/100, (bp%100)/10)
+		}
+		drawText(text, rect{left: 0, top: y, right: chart.left - 6, bottom: y + 14}, 0x02) // DT_RIGHT
+	}
+	axisLabel(scaleBP, chart.top)
+	axisLabel(scaleBP/2, chart.top+chartH/2-7)
+	axisLabel(0, chart.bottom-14)
 
 	procSelectObject.Call(hdc, oldFont)
 	procDeleteObject.Call(font)
