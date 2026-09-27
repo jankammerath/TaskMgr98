@@ -105,8 +105,9 @@ var (
 	hwndPFMeter  syscall.Handle
 	hwndPFHist   syscall.Handle
 
-	perfLabels perfStatics
-	perfStats  performanceInformation
+	perfLabels   perfStatics
+	perfCaptions []syscall.Handle
+	perfStats    performanceInformation
 
 	prevSysIdle   fileTime
 	prevSysKernel fileTime
@@ -211,37 +212,30 @@ func createPerfView(hwndParent syscall.Handle, hInstance uintptr) syscall.Handle
 		return syscall.Handle(h)
 	}
 
+	addStat := func(caption string) syscall.Handle {
+		perfCaptions = append(perfCaptions, makeStatic(hwndPerfContainer, caption, ssLeft))
+		return makeStatic(hwndPerfContainer, "0", ssRight)
+	}
+
 	// Totals
-	makeStatic(hwndPerfContainer, "Handles", ssLeft)
-	perfLabels.handles = makeStatic(hwndPerfContainer, "0", ssRight)
-	makeStatic(hwndPerfContainer, "Threads", ssLeft)
-	perfLabels.threads = makeStatic(hwndPerfContainer, "0", ssRight)
-	makeStatic(hwndPerfContainer, "Processes", ssLeft)
-	perfLabels.processes = makeStatic(hwndPerfContainer, "0", ssRight)
+	perfLabels.handles = addStat("Handles")
+	perfLabels.threads = addStat("Threads")
+	perfLabels.processes = addStat("Processes")
 
 	// Physical Memory
-	makeStatic(hwndPerfContainer, "Total", ssLeft)
-	perfLabels.physTotal = makeStatic(hwndPerfContainer, "0", ssRight)
-	makeStatic(hwndPerfContainer, "Available", ssLeft)
-	perfLabels.physAvail = makeStatic(hwndPerfContainer, "0", ssRight)
-	makeStatic(hwndPerfContainer, "System Cache", ssLeft)
-	perfLabels.physCache = makeStatic(hwndPerfContainer, "0", ssRight)
+	perfLabels.physTotal = addStat("Total")
+	perfLabels.physAvail = addStat("Available")
+	perfLabels.physCache = addStat("System Cache")
 
 	// Commit Charge
-	makeStatic(hwndPerfContainer, "Total", ssLeft)
-	perfLabels.commitTotal = makeStatic(hwndPerfContainer, "0", ssRight)
-	makeStatic(hwndPerfContainer, "Limit", ssLeft)
-	perfLabels.commitLimit = makeStatic(hwndPerfContainer, "0", ssRight)
-	makeStatic(hwndPerfContainer, "Peak", ssLeft)
-	perfLabels.commitPeak = makeStatic(hwndPerfContainer, "0", ssRight)
+	perfLabels.commitTotal = addStat("Total")
+	perfLabels.commitLimit = addStat("Limit")
+	perfLabels.commitPeak = addStat("Peak")
 
 	// Kernel Memory
-	makeStatic(hwndPerfContainer, "Total", ssLeft)
-	perfLabels.kernelTotal = makeStatic(hwndPerfContainer, "0", ssRight)
-	makeStatic(hwndPerfContainer, "Paged", ssLeft)
-	perfLabels.kernelPaged = makeStatic(hwndPerfContainer, "0", ssRight)
-	makeStatic(hwndPerfContainer, "Nonpaged", ssLeft)
-	perfLabels.kernelNonpaged = makeStatic(hwndPerfContainer, "0", ssRight)
+	perfLabels.kernelTotal = addStat("Total")
+	perfLabels.kernelPaged = addStat("Paged")
+	perfLabels.kernelNonpaged = addStat("Nonpaged")
 
 	return hwndPerfContainer
 }
@@ -320,21 +314,33 @@ func layoutPerfView() {
 	procMoveWindow.Call(uintptr(hwndGrpCommit), uintptr(col1X), uintptr(row2Y), uintptr(boxW), uintptr(boxH), 1)
 	procMoveWindow.Call(uintptr(hwndGrpKernel), uintptr(col2X), uintptr(row2Y), uintptr(boxW), uintptr(boxH), 1)
 
-	layoutStatBlock := func(boxX, boxY, bW int32, row1, row2, row3 syscall.Handle) {
+	layoutStatBlock := func(boxX, boxY, bW int32, captions, values [3]syscall.Handle) {
 		valW := int32(75)
 		valX := boxX + bW - valW - 12
+		lblX := boxX + 12
+		lblW := valX - lblX - 4
 		lineH := int32(16)
 		startY := boxY + 20
 
-		procMoveWindow.Call(uintptr(row1), uintptr(valX), uintptr(startY), uintptr(valW), uintptr(lineH), 1)
-		procMoveWindow.Call(uintptr(row2), uintptr(valX), uintptr(startY+lineH), uintptr(valW), uintptr(lineH), 1)
-		procMoveWindow.Call(uintptr(row3), uintptr(valX), uintptr(startY+lineH*2), uintptr(valW), uintptr(lineH), 1)
+		for i := 0; i < 3; i++ {
+			y := startY + int32(i)*lineH
+			procMoveWindow.Call(uintptr(captions[i]), uintptr(lblX), uintptr(y), uintptr(lblW), uintptr(lineH), 1)
+			procMoveWindow.Call(uintptr(values[i]), uintptr(valX), uintptr(y), uintptr(valW), uintptr(lineH), 1)
+		}
 	}
 
-	layoutStatBlock(col1X, row1Y, boxW, perfLabels.handles, perfLabels.threads, perfLabels.processes)
-	layoutStatBlock(col2X, row1Y, boxW, perfLabels.physTotal, perfLabels.physAvail, perfLabels.physCache)
-	layoutStatBlock(col1X, row2Y, boxW, perfLabels.commitTotal, perfLabels.commitLimit, perfLabels.commitPeak)
-	layoutStatBlock(col2X, row2Y, boxW, perfLabels.kernelTotal, perfLabels.kernelPaged, perfLabels.kernelNonpaged)
+	layoutStatBlock(col1X, row1Y, boxW,
+		[3]syscall.Handle{perfCaptions[0], perfCaptions[1], perfCaptions[2]},
+		[3]syscall.Handle{perfLabels.handles, perfLabels.threads, perfLabels.processes})
+	layoutStatBlock(col2X, row1Y, boxW,
+		[3]syscall.Handle{perfCaptions[3], perfCaptions[4], perfCaptions[5]},
+		[3]syscall.Handle{perfLabels.physTotal, perfLabels.physAvail, perfLabels.physCache})
+	layoutStatBlock(col1X, row2Y, boxW,
+		[3]syscall.Handle{perfCaptions[6], perfCaptions[7], perfCaptions[8]},
+		[3]syscall.Handle{perfLabels.commitTotal, perfLabels.commitLimit, perfLabels.commitPeak})
+	layoutStatBlock(col2X, row2Y, boxW,
+		[3]syscall.Handle{perfCaptions[9], perfCaptions[10], perfCaptions[11]},
+		[3]syscall.Handle{perfLabels.kernelTotal, perfLabels.kernelPaged, perfLabels.kernelNonpaged})
 }
 
 func showPerfView(visible bool) {
