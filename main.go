@@ -22,8 +22,9 @@ const (
 	colorWindow        = 5  // COLOR_WINDOW
 	colorBtnFace       = 15 // COLOR_BTNFACE
 
-	mfString = 0x00000000
-	mfPopup  = 0x00000010
+	mfString    = 0x00000000
+	mfPopup     = 0x00000010
+	mfSeparator = 0x00000800
 
 	iccTabClasses      = 0x00000008
 	iccBarClasses      = 0x00000004
@@ -360,6 +361,10 @@ func createMenuBar(hwnd syscall.Handle) {
 	addPopup := func(label string, items ...menuItem) {
 		hPopup, _, _ := procCreatePopupMenu.Call()
 		for _, item := range items {
+			if item.text == "-" {
+				procAppendMenu.Call(hPopup, mfSeparator, 0, 0)
+				continue
+			}
 			itemText, _ := syscall.UTF16PtrFromString(item.text)
 			procAppendMenu.Call(hPopup, mfString, item.id, uintptr(unsafe.Pointer(itemText)))
 		}
@@ -367,7 +372,10 @@ func createMenuBar(hwnd syscall.Handle) {
 		procAppendMenu.Call(hMenuBar, mfPopup, hPopup, uintptr(unsafe.Pointer(labelText)))
 	}
 
-	addPopup("File", menuItem{idFileExit, "Exit Task Manager 98"})
+	addPopup("File",
+		menuItem{idNewTask, "New Task (Run...)"},
+		menuItem{0, "-"},
+		menuItem{idFileExit, "Exit Task Manager 98"})
 	addPopup("Options")
 	addPopup("View")
 	addPopup("Help", menuItem{idHelpAbout, "About"})
