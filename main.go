@@ -64,6 +64,11 @@ const (
 	idOptMinimizeUse = 1004
 	idOptHideWhenMin = 1005
 	idHelpLink       = 1006
+	idViewRefresh    = 1007
+	idViewSpeedHigh  = 1008 // speed ids must stay contiguous for CheckMenuRadioItem
+	idViewSpeedNorm  = 1009
+	idViewSpeedLow   = 1010
+	idViewSpeedPause = 1011
 	idAppListTimer   = 1
 	timerIntervalMs  = 1500
 
@@ -217,8 +222,10 @@ var (
 	procCreateFontIndirect   = gdi32.NewProc("CreateFontIndirectW")
 	procSetBkMode            = gdi32.NewProc("SetBkMode")
 
-	procCreateSolidBrush = gdi32.NewProc("CreateSolidBrush")
-	procCheckMenuItem    = user32.NewProc("CheckMenuItem")
+	procCreateSolidBrush   = gdi32.NewProc("CreateSolidBrush")
+	procCheckMenuItem      = user32.NewProc("CheckMenuItem")
+	procCheckMenuRadioItem = user32.NewProc("CheckMenuRadioItem")
+	procKillTimer          = user32.NewProc("KillTimer")
 )
 
 // hwndTab and hwndStatus are set once in main and read by wndProc for layout.
@@ -229,6 +236,7 @@ var (
 	hMainMenu         uintptr
 	minimizeOnUse     bool
 	hideWhenMinimized bool
+	updateIntervalMs  = timerIntervalMs // last non-paused timer interval
 )
 
 // wndProc is invoked directly by Windows (via the syscall.NewCallback registered as
@@ -261,14 +269,7 @@ func wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr) (resul
 		mmi.ptMinTrackSize = point{x: minWindowWidth, y: minWindowHeight}
 		return 0
 	case wmTimer:
-		refreshAppList()
-		refreshProcList()
-		refreshPerfData()
-		updateStatusBar()
-		updateTrayIcon()
-		if netViewVisible {
-			refreshNetData()
-		}
+		refreshAllViews()
 		return 0
 	case wmTrayCallback:
 		switch lParam & 0xFFFF {
@@ -356,10 +357,51 @@ func wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr) (resul
 			hideWhenMinimized = !hideWhenMinimized
 			updateOptionsMenuChecks()
 			return 0
+		case idViewRefresh:
+			refreshAllViews()
+			return 0
+		case idViewSpeedHigh:
+			setUpdateSpeed(hwnd, 500, idViewSpeedHigh)
+			return 0
+		case idViewSpeedNorm:
+			setUpdateSpeed(hwnd, timerIntervalMs, idViewSpeedNorm)
+			return 0
+		case idViewSpeedLow:
+			setUpdateSpeed(hwnd, 4000, idViewSpeedLow)
+			return 0
+		case idViewSpeedPause:
+			setUpdateSpeed(hwnd, 0, idViewSpeedPause)
+			return 0
 		}
 	}
 	ret, _, _ := procDefWindowProc.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
 	return ret
+}
+
+// refreshAllViews updates every tab's data plus the status bar and tray icon.
+func refreshAllViews() {
+	refreshAppList()
+	refreshProcList()
+	refreshPerfData()
+	updateStatusBar()
+	updateTrayIcon()
+	if netViewVisible {
+		refreshNetData()
+	}
+}
+
+// setUpdateSpeed restarts (or, with ms == 0, pauses) the refresh timer and moves
+// the Update Speed radio check.
+func setUpdateSpeed(hwnd syscall.Handle, ms int, id uintptr) {
+	if ms == 0 {
+		procKillTimer.Call(uintptr(hwnd), idAppListTimer)
+	} else {
+		updateIntervalMs = ms
+		procSetTimer.Call(uintptr(hwnd), idAppListTimer, uintptr(ms), 0)
+	}
+	if hMainMenu != 0 {
+		procCheckMenuRadioItem.Call(hMainMenu, idViewSpeedHigh, idViewSpeedPause, id, 0) // MF_BYCOMMAND
+	}
 }
 
 // layoutChildren positions the tab control to fill the client area above the status bar.
@@ -429,7 +471,7 @@ func createMenuBar(hwnd syscall.Handle) {
 
 	hMenuBar, _, _ := procCreateMenu.Call()
 
-	addPopup := func(label string, items ...menuItem) {
+	addPopup := func(label string, items ...menuItem) uintptr {
 		hPopup, _, _ := procCreatePopupMenu.Call()
 		for _, item := range items {
 			if item.text == "-" {
@@ -441,6 +483,7 @@ func createMenuBar(hwnd syscall.Handle) {
 		}
 		labelText, _ := syscall.UTF16PtrFromString(label)
 		procAppendMenu.Call(hMenuBar, mfPopup, hPopup, uintptr(unsafe.Pointer(labelText)))
+		return hPopup
 	}
 
 	addPopup("File",
@@ -451,13 +494,27 @@ func createMenuBar(hwnd syscall.Handle) {
 		menuItem{idOptAlwaysOnTop, "Always On Top"},
 		menuItem{idOptMinimizeUse, "Minimize On Use"},
 		menuItem{idOptHideWhenMin, "Hide When Minimized"})
-	addPopup("View")
+	viewPopup := addPopup("View", menuItem{idViewRefresh, "Refresh Now"})
+	speedPopup, _, _ := procCreatePopupMenu.Call()
+	for _, item := range []menuItem{
+		{idViewSpeedHigh, "High"},
+		{idViewSpeedNorm, "Normal"},
+		{idViewSpeedLow, "Low"},
+		{idViewSpeedPause, "Paused"},
+	} {
+		itemText, _ := syscall.UTF16PtrFromString(item.text)
+		procAppendMenu.Call(speedPopup, mfString, item.id, uintptr(unsafe.Pointer(itemText)))
+	}
+	speedLabel, _ := syscall.UTF16PtrFromString("Update Speed")
+	procAppendMenu.Call(viewPopup, mfPopup, speedPopup, uintptr(unsafe.Pointer(speedLabel)))
+
 	addPopup("Help",
 		menuItem{idHelpLink, "Task Manager 98 Help Topics"},
 		menuItem{0, "-"},
 		menuItem{idHelpAbout, "About Task Manager 98"})
 
 	hMainMenu = hMenuBar
+	procCheckMenuRadioItem.Call(hMainMenu, idViewSpeedHigh, idViewSpeedPause, idViewSpeedNorm, 0)
 	procSetMenu.Call(uintptr(hwnd), hMenuBar)
 }
 

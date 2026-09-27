@@ -303,7 +303,7 @@ func refreshNetData() {
 		ad.utilBP = 0
 		if ad.havePrev && ad.connected && speed > 0 {
 			bits := (row.inOctets - ad.prevIn + row.outOctets - ad.prevOut) * 8
-			bp := bits * 10000 * 1000 / (speed * timerIntervalMs)
+			bp := bits * 10000 * 1000 / (speed * uint64(updateIntervalMs))
 			ad.utilBP = min(int(bp), 10000)
 		}
 		ad.prevIn = row.inOctets
