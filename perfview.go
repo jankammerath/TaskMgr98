@@ -121,6 +121,7 @@ var (
 	pfHistory  = make([]int, 0, 200)
 
 	perfClassRegistered = false
+	perfViewVisible     = false
 )
 
 func registerPerfGraphClass(hInstance uintptr) {
@@ -347,6 +348,7 @@ func showPerfView(visible bool) {
 	if hwndPerfContainer == 0 {
 		return
 	}
+	perfViewVisible = visible
 	cmd := swHide
 	if visible {
 		cmd = swShowNoActivate

@@ -226,6 +226,9 @@ func wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr) (resul
 	case wmTimer:
 		refreshAppList()
 		refreshProcList()
+		if perfViewVisible {
+			refreshPerfData()
+		}
 		return 0
 	case wmCtlColorBtn, wmCtlColorStatic:
 		procSetBkMode.Call(wParam, transparentBkMode)
