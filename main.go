@@ -246,6 +246,9 @@ func wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr) (resul
 		if perfViewVisible {
 			refreshPerfData()
 		}
+		if netViewVisible {
+			refreshNetData()
+		}
 		return 0
 	case wmCtlColorBtn, wmCtlColorStatic:
 		procSetBkMode.Call(wParam, transparentBkMode)
@@ -267,6 +270,7 @@ func wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr) (resul
 			showAppList(int32(sel) == 0)
 			showProcList(int32(sel) == 1)
 			showPerfView(int32(sel) == 2)
+			showNetView(int32(sel) == 3)
 		case hdr.hwndFrom == hwndAppList && hdr.code == lvnColumnClick:
 			nmlv := *(**nmListView)(unsafe.Pointer(&lParam))
 			setAppSortColumn(nmlv.iSubItem)
@@ -328,6 +332,7 @@ func layoutChildren(hwnd syscall.Handle) {
 	layoutAppList()
 	layoutProcList()
 	layoutPerfView()
+	layoutNetView()
 }
 
 // createMessageFont builds the current system UI font (e.g. Segoe UI) so controls
@@ -520,6 +525,7 @@ func main() {
 	hwndProcList = createProcListView(syscall.Handle(hwnd), hInstance)
 	createProcListButtons(syscall.Handle(hwnd), hInstance)
 	createPerfView(syscall.Handle(hwnd), hInstance)
+	createNetView(syscall.Handle(hwnd), hInstance)
 	hwndStatus = createStatusBar(syscall.Handle(hwnd), hInstance)
 	if font := createMessageFont(); font != 0 {
 		procSendMessage.Call(uintptr(hwndTab), wmSetFont, font, 1)
@@ -531,6 +537,7 @@ func main() {
 		procSendMessage.Call(uintptr(hwndEndProcess), wmSetFont, font, 1)
 		procSendMessage.Call(uintptr(hwndShowAllUsers), wmSetFont, font, 1)
 		setPerfFonts(font)
+		setNetFonts(font)
 		procSendMessage.Call(uintptr(hwndStatus), wmSetFont, font, 1)
 	}
 	layoutChildren(syscall.Handle(hwnd))
