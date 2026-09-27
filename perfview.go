@@ -378,10 +378,7 @@ func refreshPerfData() {
 			totalSys := kernelDiff + userDiff
 
 			if totalSys > 0 {
-				busy := totalSys - idleDiff
-				if busy < 0 {
-					busy = 0
-				}
+				busy := max(totalSys-idleDiff, 0)
 				currentCPUUsage = int((busy * 100) / totalSys)
 				if currentCPUUsage > 100 {
 					currentCPUUsage = 100
