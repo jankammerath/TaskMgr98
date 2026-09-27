@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- WiX v4/v5 package; built via `wix build` with -d ExePath=<path to TaskMgr98.exe>
+     and -arch x64 / arm64 (see release.ps1). Requires WixToolset.UI.wixext. -->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+
+  <Package Name="Task Manager 98"
+           Manufacturer="Jan Kamerath"
+           Version="1.0.0.0"
+           UpgradeCode="9f1c36c2-4e1a-4c7b-a1d0-7c9b98d3a5e1"
+           Language="1033"
+           InstallerVersion="500"
+           Scope="perMachine"
+           Compressed="yes">
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Task Manager 98 is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="AppIcon.ico" SourceFile="media/icon.ico" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Task Manager 98" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
+    <StandardDirectory Id="DesktopFolder" />
+
+    <Feature Id="MainFeature" Title="Task Manager 98" Description="The Task Manager 98 application." AllowAbsent="no">
+      <ComponentRef Id="MainExecutable" />
+    </Feature>
+    <Feature Id="StartMenuShortcutFeature" Title="Start Menu Shortcut" Description="Create a Start menu shortcut." Level="1">
+      <ComponentRef Id="StartMenuShortcut" />
+    </Feature>
+    <Feature Id="DesktopShortcutFeature" Title="Desktop Shortcut" Description="Create a desktop shortcut." Level="1">
+      <ComponentRef Id="DesktopShortcut" />
+    </Feature>
+
+    <!-- Feature tree UI lets the user toggle the shortcut features. -->
+    <ui:WixUI Id="WixUI_FeatureTree" />
+  </Package>
+
+  <Fragment>
+    <Component Id="MainExecutable" Directory="INSTALLFOLDER">
+      <File Id="TaskMgr98Exe" Name="TaskMgr98.exe" Source="$(var.ExePath)" KeyPath="yes" />
+    </Component>
+
+    <!-- Non-advertised shortcuts need a registry key path. -->
+    <Component Id="StartMenuShortcut" Directory="ProgramMenuFolder">
+      <Shortcut Id="StartMenuLink"
+                Name="Task Manager 98"
+                Target="[INSTALLFOLDER]TaskMgr98.exe"
+                WorkingDirectory="INSTALLFOLDER"
+                Icon="AppIcon.ico" />
+      <RegistryValue Root="HKCU" Key="Software\TaskMgr98" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <Component Id="DesktopShortcut" Directory="DesktopFolder">
+      <Shortcut Id="DesktopLink"
+                Name="Task Manager 98"
+                Target="[INSTALLFOLDER]TaskMgr98.exe"
+                WorkingDirectory="INSTALLFOLDER"
+                Icon="AppIcon.ico" />
+      <RegistryValue Root="HKCU" Key="Software\TaskMgr98" Name="DesktopShortcut" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+  </Fragment>
+</Wix>
