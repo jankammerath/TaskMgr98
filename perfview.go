@@ -561,11 +561,12 @@ func drawBarMeter(hdc uintptr, rc rect, percent int, label string) {
 	procSetTextColor.Call(hdc, 0x0000FF00)
 
 	labelFont := logFont{lfHeight: -11, lfWeight: 400}
-	copy(labelFont.lfFaceName[:], syscall.StringToUTF16("Segoe UI"))
+	faceName, _ := syscall.UTF16FromString("Segoe UI")
+	copy(labelFont.lfFaceName[:], faceName)
 	font, _, _ := procCreateFontIndirect.Call(uintptr(unsafe.Pointer(&labelFont)))
 	oldFont, _, _ := procSelectObject.Call(hdc, font)
 
-	textRect := rect{left: 4, top: meterBottom + 6, right: w - 4, bottom: h + 4}
+	textRect := rect{left: 4, top: meterBottom + 2, right: w - 4, bottom: h}
 	labelPtr, _ := syscall.UTF16PtrFromString(label)
 	dtCenter := uintptr(0x00000001 | 0x00000004 | 0x00000020) // DT_CENTER | DT_VCENTER | DT_SINGLELINE
 	procDrawTextW.Call(hdc, uintptr(unsafe.Pointer(labelPtr)), uintptr(int32(len(label))), uintptr(unsafe.Pointer(&textRect)), dtCenter)
