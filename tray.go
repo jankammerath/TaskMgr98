@@ -87,6 +87,19 @@ func makeCPUTrayIcon(percent int) syscall.Handle {
 	procFillRect.Call(memDC, uintptr(unsafe.Pointer(&full)), blackBrush)
 	procDeleteObject.Call(blackBrush)
 
+	// 5x5 grid on the unlit background (the bar is drawn over it afterwards).
+	gridPen, _, _ := procCreatePen.Call(psSolid, 1, 0x00006600)
+	oldPen, _, _ := procSelectObject.Call(memDC, gridPen)
+	for i := int32(1); i < 5; i++ {
+		pos := i * 16 / 5
+		procMoveToEx.Call(memDC, uintptr(pos), 0, 0)
+		procLineTo.Call(memDC, uintptr(pos), 16)
+		procMoveToEx.Call(memDC, 0, uintptr(pos), 0)
+		procLineTo.Call(memDC, 16, uintptr(pos))
+	}
+	procSelectObject.Call(memDC, oldPen)
+	procDeleteObject.Call(gridPen)
+
 	barH := int32(min(max(percent, 0), 100)) * 16 / 100
 	if percent > 0 && barH == 0 {
 		barH = 1
@@ -97,20 +110,6 @@ func makeCPUTrayIcon(percent int) syscall.Handle {
 		procFillRect.Call(memDC, uintptr(unsafe.Pointer(&bar)), greenBrush)
 		procDeleteObject.Call(greenBrush)
 	}
-
-	// Dark green grid over the whole icon, splitting the bar into LED cells.
-	gridPen, _, _ := procCreatePen.Call(psSolid, 1, 0x00006600)
-	oldPen, _, _ := procSelectObject.Call(memDC, gridPen)
-	for x := int32(0); x < 16; x += 4 {
-		procMoveToEx.Call(memDC, uintptr(x), 0, 0)
-		procLineTo.Call(memDC, uintptr(x), 16)
-	}
-	for y := int32(3); y < 16; y += 4 {
-		procMoveToEx.Call(memDC, 0, uintptr(y), 0)
-		procLineTo.Call(memDC, 16, uintptr(y))
-	}
-	procSelectObject.Call(memDC, oldPen)
-	procDeleteObject.Call(gridPen)
 
 	procSelectObject.Call(memDC, oldBmp)
 	procDeleteDC.Call(memDC)
