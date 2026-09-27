@@ -106,7 +106,7 @@ func showAboutDialog(owner syscall.Handle) {
 	procSendMessage.Call(uintptr(iconStatic), stmSetIcon, icon, 0)
 
 	makeStatic("Task Manager 98", 0, 72, 20, 320, 18)
-	makeStatic("Version 2026.9.28", 0, 72, 40, 320, 18)
+	makeStatic("Version 2026.9.27", 0, 72, 40, 320, 18)
 	makeStatic("Copyright © Jan Kamerath 1985-2026", 0, 72, 60, 320, 18)
 
 	makeStatic("", ssEtchedHorz, 72, 118, dlgW-72-20, 2)

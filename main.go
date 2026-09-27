@@ -63,6 +63,7 @@ const (
 	idOptAlwaysOnTop = 1003
 	idOptMinimizeUse = 1004
 	idOptHideWhenMin = 1005
+	idHelpLink       = 1006
 	idAppListTimer   = 1
 	timerIntervalMs  = 1500
 
@@ -446,7 +447,10 @@ func createMenuBar(hwnd syscall.Handle) {
 		menuItem{idOptMinimizeUse, "Minimize On Use"},
 		menuItem{idOptHideWhenMin, "Hide When Minimized"})
 	addPopup("View")
-	addPopup("Help", menuItem{idHelpAbout, "About Task Manager 98"})
+	addPopup("Help",
+		menuItem{idHelpLink, "Task Manager 98 Help Topics"},
+		menuItem{0, "-"},
+		menuItem{idHelpAbout, "About Task Manager 98"})
 
 	hMainMenu = hMenuBar
 	procSetMenu.Call(uintptr(hwnd), hMenuBar)
