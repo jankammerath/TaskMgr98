@@ -501,6 +501,67 @@ func insertAppRow(index int32, title string, iconIndex int32) {
 	procSendMessage.Call(uintptr(hwndAppList), lvmSetItemW, 0, uintptr(unsafe.Pointer(&status)))
 }
 
+// showAppContextMenu pops up the task context menu at the cursor; the selection
+// arrives as WM_COMMAND in wndProc.
+func showAppContextMenu(hwnd syscall.Handle) {
+	n := len(selectedTaskHwnds())
+	if n == 0 {
+		return
+	}
+	menu, _, _ := procCreatePopupMenu.Call()
+	if menu == 0 {
+		return
+	}
+	add := func(id uintptr, text string, enabled bool) {
+		flags := uintptr(mfString)
+		if !enabled {
+			flags |= mfGrayed
+		}
+		t, _ := syscall.UTF16PtrFromString(text)
+		procAppendMenu.Call(menu, flags, id, uintptr(unsafe.Pointer(t)))
+	}
+	add(idSwitchTo, "Switch To", n == 1)
+	add(idWinBringFront, "Bring To Front", true)
+	procAppendMenu.Call(menu, mfSeparator, 0, 0)
+	add(idWinMinimize, "Minimize", true)
+	add(idWinMaximize, "Maximize", true)
+	add(idWinCascade, "Cascade", n >= 2)
+	add(idWinTileHorz, "Tile Horizontally", n >= 2)
+	add(idWinTileVert, "Tile Vertically", n >= 2)
+	procAppendMenu.Call(menu, mfSeparator, 0, 0)
+	add(idEndTask, "End Task", true)
+	add(idGoToProcess, "Go To Process", n == 1)
+	procSetMenuDefaultItem.Call(menu, idSwitchTo, 0)
+
+	var pt point
+	procGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
+	procTrackPopupMenu.Call(menu, tpmRightButton, uintptr(pt.x), uintptr(pt.y), 0, uintptr(hwnd), 0)
+	procPostMessage.Call(uintptr(hwnd), 0, 0, 0) // WM_NULL, per TrackPopupMenu docs
+	procDestroyMenu.Call(menu)
+}
+
+// goToSelectedProcess switches to the Processes tab and selects the process that
+// owns the selected task's window.
+func goToSelectedProcess() {
+	entry, ok := selectedEntry()
+	if !ok {
+		return
+	}
+	var pid uint32
+	procGetWindowThreadProcessId.Call(uintptr(entry.hwnd), uintptr(unsafe.Pointer(&pid)))
+	if pid == 0 {
+		return
+	}
+	selectTab(1)
+	refreshProcList()
+	for i, e := range currentProcEntries {
+		if e.pid == pid {
+			selectProcRow(i)
+			break
+		}
+	}
+}
+
 // endSelectedTask asks the selected window to close, like Task Manager's End Task.
 func endSelectedTask() {
 	entry, ok := selectedEntry()

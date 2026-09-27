@@ -35,9 +35,11 @@ const (
 	tcmInsertItem  = tcmFirst + 62 // TCM_INSERTITEMW
 	tcmAdjustRect  = tcmFirst + 40 // TCM_ADJUSTRECT
 	tcmGetCurSel   = tcmFirst + 11 // TCM_GETCURSEL
+	tcmSetCurSel   = tcmFirst + 12 // TCM_SETCURSEL
 	tcifText       = 0x0001
 	tcnSelChange   = -551 // TCN_SELCHANGE
 	lvnColumnClick = -108 // LVN_FIRST(-100) - 8
+	nmRClick       = -5   // NM_RCLICK
 
 	sbarsSizeGrip = 0x0100
 	sbSetParts    = 0x0404 // SB_SETPARTS
@@ -87,6 +89,7 @@ const (
 	idViewNetRecv    = 1026
 	idViewNetTotal   = 1027
 	idViewNetCols    = 1028
+	idGoToProcess    = 1029
 	idAppListTimer   = 1
 	timerIntervalMs  = 1500
 
@@ -342,15 +345,9 @@ func wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr) (resul
 		switch {
 		case hdr.hwndFrom == hwndTab && hdr.code == tcnSelChange:
 			sel, _, _ := procSendMessage.Call(uintptr(hwndTab), tcmGetCurSel, 0, 0)
-			showAppList(int32(sel) == 0)
-			showProcList(int32(sel) == 1)
-			showPerfView(int32(sel) == 2)
-			showNetView(int32(sel) == 3)
-			updateAppViewMenu(int32(sel) == 0)
-			updateWindowsMenu(hwnd, int32(sel) == 0)
-			updateProcViewMenu(int32(sel) == 1)
-			updatePerfViewMenu(int32(sel) == 2)
-			updateNetViewMenu(int32(sel) == 3)
+			selectTab(int32(sel))
+		case hdr.hwndFrom == hwndAppList && hdr.code == nmRClick:
+			showAppContextMenu(hwnd)
 		case hdr.hwndFrom == hwndAppList && hdr.code == lvnColumnClick:
 			nmlv := *(**nmListView)(unsafe.Pointer(&lParam))
 			setAppSortColumn(nmlv.iSubItem)
@@ -434,6 +431,9 @@ func wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr) (resul
 		case idWinTileHorz, idWinTileVert, idWinMinimize, idWinMaximize, idWinCascade, idWinBringFront:
 			runWindowsMenuAction(wParam & 0xFFFF)
 			return 0
+		case idGoToProcess:
+			goToSelectedProcess()
+			return 0
 		case idViewSelectCols:
 			showColumnsDialog(hwnd)
 			return 0
@@ -469,6 +469,21 @@ func wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr) (resul
 	}
 	ret, _, _ := procDefWindowProc.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
 	return ret
+}
+
+// selectTab switches the visible tab page and its tab-specific menus; also used
+// programmatically (e.g. Go To Process), since TCM_SETCURSEL sends no notification.
+func selectTab(index int32) {
+	procSendMessage.Call(uintptr(hwndTab), tcmSetCurSel, uintptr(index), 0)
+	showAppList(index == 0)
+	showProcList(index == 1)
+	showPerfView(index == 2)
+	showNetView(index == 3)
+	updateAppViewMenu(index == 0)
+	updateWindowsMenu(appMainHwnd, index == 0)
+	updateProcViewMenu(index == 1)
+	updatePerfViewMenu(index == 2)
+	updateNetViewMenu(index == 3)
 }
 
 // refreshAllViews updates every tab's data plus the status bar and tray icon.
