@@ -560,10 +560,18 @@ func drawBarMeter(hdc uintptr, rc rect, percent int, label string) {
 	procSetBkMode.Call(hdc, 1) // TRANSPARENT
 	procSetTextColor.Call(hdc, 0x0000FF00)
 
-	textRect := rect{left: 0, top: meterBottom + 2, right: w, bottom: h}
+	labelFont := logFont{lfHeight: -11, lfWeight: 400}
+	copy(labelFont.lfFaceName[:], syscall.StringToUTF16("Segoe UI"))
+	font, _, _ := procCreateFontIndirect.Call(uintptr(unsafe.Pointer(&labelFont)))
+	oldFont, _, _ := procSelectObject.Call(hdc, font)
+
+	textRect := rect{left: 4, top: meterBottom + 6, right: w - 4, bottom: h + 4}
 	labelPtr, _ := syscall.UTF16PtrFromString(label)
 	dtCenter := uintptr(0x00000001 | 0x00000004 | 0x00000020) // DT_CENTER | DT_VCENTER | DT_SINGLELINE
 	procDrawTextW.Call(hdc, uintptr(unsafe.Pointer(labelPtr)), uintptr(int32(len(label))), uintptr(unsafe.Pointer(&textRect)), dtCenter)
+
+	procSelectObject.Call(hdc, oldFont)
+	procDeleteObject.Call(font)
 }
 
 func drawHistoryGraph(hdc uintptr, rc rect, values []int, lineColor uint32) {
