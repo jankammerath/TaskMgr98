@@ -186,6 +186,7 @@ func toggleAlwaysOnTop() {
 		insertAfter = ^uintptr(0) // HWND_TOPMOST (-1)
 	}
 	procSetWindowPos.Call(uintptr(appMainHwnd), insertAfter, 0, 0, 0, 0, swpNoMove|swpNoSize)
+	updateOptionsMenuChecks()
 }
 
 // showTrayMenu pops up the tray context menu at the cursor; the selection arrives

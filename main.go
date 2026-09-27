@@ -56,12 +56,18 @@ const (
 	minWindowWidth  = 370
 	minWindowHeight = 480
 
-	idTab           = 100
-	idStatus        = 101
-	idFileExit      = 1001
-	idHelpAbout     = 1002
-	idAppListTimer  = 1
-	timerIntervalMs = 1500
+	idTab            = 100
+	idStatus         = 101
+	idFileExit       = 1001
+	idHelpAbout      = 1002
+	idOptAlwaysOnTop = 1003
+	idOptMinimizeUse = 1004
+	idOptHideWhenMin = 1005
+	idAppListTimer   = 1
+	timerIntervalMs  = 1500
+
+	swMinimize    = 6
+	sizeMinimized = 1 // WM_SIZE wParam
 )
 
 type wndClassEx struct {
@@ -211,12 +217,17 @@ var (
 	procSetBkMode            = gdi32.NewProc("SetBkMode")
 
 	procCreateSolidBrush = gdi32.NewProc("CreateSolidBrush")
+	procCheckMenuItem    = user32.NewProc("CheckMenuItem")
 )
 
 // hwndTab and hwndStatus are set once in main and read by wndProc for layout.
 var (
 	hwndTab    syscall.Handle
 	hwndStatus syscall.Handle
+
+	hMainMenu         uintptr
+	minimizeOnUse     bool
+	hideWhenMinimized bool
 )
 
 // wndProc is invoked directly by Windows (via the syscall.NewCallback registered as
@@ -238,6 +249,10 @@ func wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr) (resul
 		procPostQuitMessage.Call(0)
 		return 0
 	case wmSize:
+		if wParam == sizeMinimized && hideWhenMinimized {
+			procShowWindow.Call(uintptr(hwnd), swHide)
+			return 0
+		}
 		layoutChildren(hwnd)
 		return 0
 	case wmGetMinMaxInfo:
@@ -305,10 +320,14 @@ func wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr) (resul
 			endSelectedTask()
 			return 0
 		case idSwitchTo:
-			switchToSelectedTask()
+			if switchToSelectedTask() && minimizeOnUse {
+				procShowWindow.Call(uintptr(hwnd), swMinimize)
+			}
 			return 0
 		case idNewTask:
-			showNewTaskDialog(hwnd)
+			if showNewTaskDialog(hwnd) && minimizeOnUse {
+				procShowWindow.Call(uintptr(hwnd), swMinimize)
+			}
 			return 0
 		case idEndProcess:
 			endSelectedProcess()
@@ -322,8 +341,16 @@ func wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr) (resul
 		case idTrayClose:
 			procDestroyWindow.Call(uintptr(hwnd))
 			return 0
-		case idTrayTopmost:
+		case idTrayTopmost, idOptAlwaysOnTop:
 			toggleAlwaysOnTop()
+			return 0
+		case idOptMinimizeUse:
+			minimizeOnUse = !minimizeOnUse
+			updateOptionsMenuChecks()
+			return 0
+		case idOptHideWhenMin:
+			hideWhenMinimized = !hideWhenMinimized
+			updateOptionsMenuChecks()
 			return 0
 		}
 	}
@@ -416,11 +443,32 @@ func createMenuBar(hwnd syscall.Handle) {
 		menuItem{idNewTask, "New Task (Run...)"},
 		menuItem{0, "-"},
 		menuItem{idFileExit, "Exit Task Manager 98"})
-	addPopup("Options")
+	addPopup("Options",
+		menuItem{idOptAlwaysOnTop, "Always On Top"},
+		menuItem{idOptMinimizeUse, "Minimize On Use"},
+		menuItem{idOptHideWhenMin, "Hide When Minimized"})
 	addPopup("View")
 	addPopup("Help", menuItem{idHelpAbout, "About"})
 
+	hMainMenu = hMenuBar
 	procSetMenu.Call(uintptr(hwnd), hMenuBar)
+}
+
+// updateOptionsMenuChecks syncs the Options menu check marks with the current state.
+func updateOptionsMenuChecks() {
+	if hMainMenu == 0 {
+		return
+	}
+	check := func(id uintptr, on bool) {
+		flags := uintptr(0) // MF_BYCOMMAND | MF_UNCHECKED
+		if on {
+			flags = mfChecked
+		}
+		procCheckMenuItem.Call(hMainMenu, id, flags)
+	}
+	check(idOptAlwaysOnTop, alwaysOnTop)
+	check(idOptMinimizeUse, minimizeOnUse)
+	check(idOptHideWhenMin, hideWhenMinimized)
 }
 
 // createTabControl creates the center tab view with the given tab labels.

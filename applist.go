@@ -497,13 +497,14 @@ func endSelectedTask() {
 }
 
 // switchToSelectedTask restores and foregrounds the selected window.
-func switchToSelectedTask() {
+func switchToSelectedTask() bool {
 	entry, ok := selectedEntry()
 	if !ok {
-		return
+		return false
 	}
 	procShowWindow.Call(uintptr(entry.hwnd), swRestore)
 	procSetForegroundWindow.Call(uintptr(entry.hwnd))
+	return true
 }
 
 // buildFilterBuf assembles a double-NUL-terminated GetOpenFileName filter string;
@@ -518,8 +519,8 @@ func buildFilterBuf(parts ...string) []uint16 {
 }
 
 // showNewTaskDialog lets the user pick a program to launch, like Task Manager's
-// "Create New Task" dialog.
-func showNewTaskDialog(owner syscall.Handle) {
+// "Create New Task" dialog; reports whether a task was actually launched.
+func showNewTaskDialog(owner syscall.Handle) bool {
 	var file [260]uint16
 	filterBuf := buildFilterBuf("Programs", "*.exe", "All Files", "*.*")
 	title, _ := syscall.UTF16PtrFromString("Create New Task")
@@ -536,11 +537,12 @@ func showNewTaskDialog(owner syscall.Handle) {
 
 	ok, _, _ := procGetOpenFileNameW.Call(uintptr(unsafe.Pointer(&ofn)))
 	if ok == 0 {
-		return
+		return false
 	}
 
 	path := syscall.UTF16ToString(file[:])
 	pathPtr, _ := syscall.UTF16PtrFromString(path)
 	openVerb, _ := syscall.UTF16PtrFromString("open")
 	procShellExecuteW.Call(0, uintptr(unsafe.Pointer(openVerb)), uintptr(unsafe.Pointer(pathPtr)), 0, 0, swShowDefault)
+	return true
 }
