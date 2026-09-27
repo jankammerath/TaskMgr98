@@ -234,6 +234,7 @@ func wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr) (resul
 	}()
 	switch message {
 	case wmDestroy:
+		removeTrayIcon()
 		procPostQuitMessage.Call(0)
 		return 0
 	case wmSize:
@@ -248,8 +249,17 @@ func wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr) (resul
 		refreshProcList()
 		refreshPerfData()
 		updateStatusBar()
+		updateTrayIcon()
 		if netViewVisible {
 			refreshNetData()
+		}
+		return 0
+	case wmTrayCallback:
+		switch lParam & 0xFFFF {
+		case wmRButtonUp:
+			showTrayMenu(hwnd)
+		case wmLButtonDblClk:
+			restoreMainWindow()
 		}
 		return 0
 	case wmCtlColorBtn, wmCtlColorStatic:
@@ -305,6 +315,15 @@ func wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr) (resul
 			return 0
 		case idShowAllUsers:
 			refreshProcList()
+			return 0
+		case idTrayRestore:
+			restoreMainWindow()
+			return 0
+		case idTrayClose:
+			procDestroyWindow.Call(uintptr(hwnd))
+			return 0
+		case idTrayTopmost:
+			toggleAlwaysOnTop()
 			return 0
 		}
 	}
@@ -573,6 +592,7 @@ func main() {
 	refreshAppList()
 	refreshPerfData()
 	updateStatusBar()
+	updateTrayIcon()
 
 	procShowWindow.Call(hwnd, swShowDefault)
 	procUpdateWindow.Call(hwnd)
