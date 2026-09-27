@@ -326,8 +326,8 @@ func showColumnsDialog(owner syscall.Handle) {
 			uintptr(hwndColumnsDlg), id, hInstance, 0,
 		)
 	}
-	makeButton("OK", idColumnsOK, dlgW-16-80-8-80)
-	makeButton("Cancel", idColumnsCancel, dlgW-16-80)
+	makeButton("OK", idColumnsOK, dlgW-16-80-8-88)
+	makeButton("Cancel", idColumnsCancel, dlgW-16-88)
 
 	if font := createMessageFont(); font != 0 {
 		procEnumChildWindows.Call(uintptr(hwndColumnsDlg), perfFontCallback, font)
