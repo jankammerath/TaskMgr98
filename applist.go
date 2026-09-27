@@ -594,12 +594,12 @@ func buildFilterBuf(parts ...string) []uint16 {
 	return append(buf, 0)
 }
 
-// showNewTaskDialog lets the user pick a program to launch, like Task Manager's
-// "Create New Task" dialog; reports whether a task was actually launched.
-func showNewTaskDialog(owner syscall.Handle) bool {
+// pickProgramPath shows the program file picker (used by the Create New Task
+// dialog's Browse... button) and returns the chosen path.
+func pickProgramPath(owner syscall.Handle) (string, bool) {
 	var file [260]uint16
 	filterBuf := buildFilterBuf("Programs", "*.exe", "All Files", "*.*")
-	title, _ := syscall.UTF16PtrFromString("Create New Task")
+	title, _ := syscall.UTF16PtrFromString("Browse")
 
 	ofn := openFileNameW{
 		hwndOwner:   owner,
@@ -613,12 +613,7 @@ func showNewTaskDialog(owner syscall.Handle) bool {
 
 	ok, _, _ := procGetOpenFileNameW.Call(uintptr(unsafe.Pointer(&ofn)))
 	if ok == 0 {
-		return false
+		return "", false
 	}
-
-	path := syscall.UTF16ToString(file[:])
-	pathPtr, _ := syscall.UTF16PtrFromString(path)
-	openVerb, _ := syscall.UTF16PtrFromString("open")
-	procShellExecuteW.Call(0, uintptr(unsafe.Pointer(openVerb)), uintptr(unsafe.Pointer(pathPtr)), 0, 0, swShowDefault)
-	return true
+	return syscall.UTF16ToString(file[:]), true
 }

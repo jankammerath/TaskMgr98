@@ -393,9 +393,7 @@ func wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr) (resul
 			}
 			return 0
 		case idNewTask:
-			if showNewTaskDialog(hwnd) && minimizeOnUse {
-				procShowWindow.Call(uintptr(hwnd), swMinimize)
-			}
+			showNewTaskDialog(hwnd)
 			return 0
 		case idEndProcess:
 			endSelectedProcess()
@@ -1097,6 +1095,12 @@ func main() {
 		ret, _, _ := procGetMessage.Call(uintptr(unsafe.Pointer(&m)), 0, 0, 0)
 		if int32(ret) <= 0 {
 			break
+		}
+		// Route Tab/Enter/Esc for the run dialog through the dialog manager.
+		if hwndNewTaskDlg != 0 {
+			if handled, _, _ := procIsDialogMessageW.Call(uintptr(hwndNewTaskDlg), uintptr(unsafe.Pointer(&m))); handled != 0 {
+				continue
+			}
 		}
 		procTranslateMessage.Call(uintptr(unsafe.Pointer(&m)))
 		procDispatchMessage.Call(uintptr(unsafe.Pointer(&m)))
