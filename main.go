@@ -90,6 +90,14 @@ const (
 	idViewNetTotal   = 1027
 	idViewNetCols    = 1028
 	idGoToProcess    = 1029
+	idEndProcessTree = 1030
+	idProcDebug      = 1031
+	idPriRealtime    = 1032 // priority ids must stay contiguous for CheckMenuRadioItem
+	idPriHigh        = 1033
+	idPriAboveNormal = 1034
+	idPriNormal      = 1035
+	idPriBelowNormal = 1036
+	idPriLow         = 1037
 	idAppListTimer   = 1
 	timerIntervalMs  = 1500
 
@@ -348,6 +356,8 @@ func wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr) (resul
 			selectTab(int32(sel))
 		case hdr.hwndFrom == hwndAppList && hdr.code == nmRClick:
 			showAppContextMenu(hwnd)
+		case hdr.hwndFrom == hwndProcList && hdr.code == nmRClick:
+			showProcContextMenu(hwnd)
 		case hdr.hwndFrom == hwndAppList && hdr.code == lvnColumnClick:
 			nmlv := *(**nmListView)(unsafe.Pointer(&lParam))
 			setAppSortColumn(nmlv.iSubItem)
@@ -433,6 +443,12 @@ func wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr) (resul
 			return 0
 		case idGoToProcess:
 			goToSelectedProcess()
+			return 0
+		case idEndProcessTree:
+			endSelectedProcessTree()
+			return 0
+		case idPriRealtime, idPriHigh, idPriAboveNormal, idPriNormal, idPriBelowNormal, idPriLow:
+			setSelectedProcessPriority(wParam & 0xFFFF)
 			return 0
 		case idViewSelectCols:
 			showColumnsDialog(hwnd)

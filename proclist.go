@@ -16,9 +16,18 @@ const (
 	th32csSnapProcess = 0x00000002
 	invalidHandle     = ^uintptr(0)
 
-	processTerminate = 0x0001
-	tokenQuery       = 0x0008
-	tokenUser        = 1
+	processTerminate      = 0x0001
+	processSetInformation = 0x0200
+	tokenQuery            = 0x0008
+	tokenUser             = 1
+
+	// GetPriorityClass/SetPriorityClass values
+	realtimePriorityClass    = 0x00000100
+	highPriorityClass        = 0x00000080
+	aboveNormalPriorityClass = 0x00008000
+	normalPriorityClass      = 0x00000020
+	belowNormalPriorityClass = 0x00004000
+	idlePriorityClass        = 0x00000040
 
 	bsAutoCheckbox = 0x00000003
 	bmSetCheck     = 0x00F1
@@ -139,6 +148,8 @@ var (
 	procGetProcessHandleCount    = kernel32.NewProc("GetProcessHandleCount")
 	procGetProcessIoCounters     = kernel32.NewProc("GetProcessIoCounters")
 	procGetGuiResources          = user32.NewProc("GetGuiResources")
+	procGetPriorityClass         = kernel32.NewProc("GetPriorityClass")
+	procSetPriorityClass         = kernel32.NewProc("SetPriorityClass")
 
 	psapi                    = syscall.NewLazyDLL("psapi.dll")
 	procGetProcessMemoryInfo = psapi.NewProc("GetProcessMemoryInfo")
@@ -557,6 +568,124 @@ func endSelectedProcess() {
 	defer procCloseHandle.Call(hProc)
 	procTerminateProcess.Call(hProc, 1)
 	refreshProcList()
+}
+
+// endSelectedProcessTree terminates the selected process and all its descendants.
+func endSelectedProcessTree() {
+	entry, ok := selectedProcEntry()
+	if !ok {
+		return
+	}
+
+	children := map[uint32][]uint32{}
+	snap, _, _ := procCreateToolhelp32Snapshot.Call(th32csSnapProcess, 0)
+	if snap != 0 && snap != invalidHandle {
+		var pe processEntry32W
+		pe.dwSize = uint32(unsafe.Sizeof(pe))
+		ok, _, _ := procProcess32FirstW.Call(snap, uintptr(unsafe.Pointer(&pe)))
+		for ok != 0 {
+			children[pe.th32ParentProcessID] = append(children[pe.th32ParentProcessID], pe.th32ProcessID)
+			ok, _, _ = procProcess32NextW.Call(snap, uintptr(unsafe.Pointer(&pe)))
+		}
+		procCloseHandle.Call(snap)
+	}
+
+	var kill func(pid uint32)
+	kill = func(pid uint32) {
+		for _, child := range children[pid] {
+			kill(child)
+		}
+		if hProc, ok := safeCall(procOpenProcess, processTerminate, 0, uintptr(pid)); ok && hProc != 0 {
+			procTerminateProcess.Call(hProc, 1)
+			procCloseHandle.Call(hProc)
+		}
+	}
+	kill(entry.pid)
+	refreshProcList()
+}
+
+// priorityMenuIDClass maps the Set Priority menu ids to priority classes.
+var priorityMenuIDClass = map[uintptr]uint32{
+	idPriRealtime:    realtimePriorityClass,
+	idPriHigh:        highPriorityClass,
+	idPriAboveNormal: aboveNormalPriorityClass,
+	idPriNormal:      normalPriorityClass,
+	idPriBelowNormal: belowNormalPriorityClass,
+	idPriLow:         idlePriorityClass,
+}
+
+// setSelectedProcessPriority applies the priority class behind a Set Priority menu id.
+func setSelectedProcessPriority(id uintptr) {
+	entry, ok := selectedProcEntry()
+	if !ok {
+		return
+	}
+	cls := priorityMenuIDClass[id]
+	if cls == 0 {
+		return
+	}
+	hProc, ok := safeCall(procOpenProcess, processSetInformation, 0, uintptr(entry.pid))
+	if !ok || hProc == 0 {
+		return
+	}
+	defer procCloseHandle.Call(hProc)
+	procSetPriorityClass.Call(hProc, uintptr(cls))
+	refreshProcList()
+}
+
+// showProcContextMenu pops up the process context menu at the cursor; the selection
+// arrives as WM_COMMAND in wndProc.
+func showProcContextMenu(hwnd syscall.Handle) {
+	entry, ok := selectedProcEntry()
+	if !ok {
+		return
+	}
+	menu, _, _ := procCreatePopupMenu.Call()
+	if menu == 0 {
+		return
+	}
+	add := func(m, id uintptr, text string, enabled bool) {
+		flags := uintptr(mfString)
+		if !enabled {
+			flags |= mfGrayed
+		}
+		t, _ := syscall.UTF16PtrFromString(text)
+		procAppendMenu.Call(m, flags, id, uintptr(unsafe.Pointer(t)))
+	}
+	add(menu, idEndProcess, "End Process", true)
+	add(menu, idEndProcessTree, "End Process Tree", true)
+	add(menu, idProcDebug, "Debug", false) // debugging isn't supported
+	procAppendMenu.Call(menu, mfSeparator, 0, 0)
+
+	priMenu, _, _ := procCreatePopupMenu.Call()
+	add(priMenu, idPriRealtime, "Realtime", true)
+	add(priMenu, idPriHigh, "High", true)
+	add(priMenu, idPriAboveNormal, "AboveNormal", true)
+	add(priMenu, idPriNormal, "Normal", true)
+	add(priMenu, idPriBelowNormal, "BelowNormal", true)
+	add(priMenu, idPriLow, "Low", true)
+	priLabel, _ := syscall.UTF16PtrFromString("Set Priority")
+	procAppendMenu.Call(menu, mfPopup, priMenu, uintptr(unsafe.Pointer(priLabel)))
+
+	// Radio-mark the process's current priority class.
+	if hProc, ok := safeCall(procOpenProcess, processQueryLimitedInformation, 0, uintptr(entry.pid)); ok && hProc != 0 {
+		cls, _, _ := procGetPriorityClass.Call(hProc)
+		procCloseHandle.Call(hProc)
+		for id, c := range priorityMenuIDClass {
+			if uintptr(c) == cls {
+				procCheckMenuRadioItem.Call(priMenu, idPriRealtime, idPriLow, id, 0)
+				break
+			}
+		}
+	}
+
+	procSetMenuDefaultItem.Call(menu, idEndProcess, 0)
+
+	var pt point
+	procGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
+	procTrackPopupMenu.Call(menu, tpmRightButton, uintptr(pt.x), uintptr(pt.y), 0, uintptr(hwnd), 0)
+	procPostMessage.Call(uintptr(hwnd), 0, 0, 0) // WM_NULL, per TrackPopupMenu docs
+	procDestroyMenu.Call(menu)                   // also destroys the attached priority submenu
 }
 
 // formatKB formats a KB count with thousands separators, e.g. "4,128 K".
