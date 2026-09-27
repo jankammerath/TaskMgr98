@@ -39,6 +39,8 @@ const (
 	lvnColumnClick = -108 // LVN_FIRST(-100) - 8
 
 	sbarsSizeGrip = 0x0100
+	sbSetParts    = 0x0404 // SB_SETPARTS
+	sbSetTextW    = 0x040B // SB_SETTEXTW
 
 	wmSetFont              = 0x0030
 	wmGetMinMaxInfo        = 0x0024
@@ -244,9 +246,8 @@ func wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr) (resul
 	case wmTimer:
 		refreshAppList()
 		refreshProcList()
-		if perfViewVisible {
-			refreshPerfData()
-		}
+		refreshPerfData()
+		updateStatusBar()
 		if netViewVisible {
 			refreshNetData()
 		}
@@ -330,10 +331,30 @@ func layoutChildren(hwnd syscall.Handle) {
 	tabHeight := client.bottom - client.top - statusHeight - 2*tabPadding
 	procMoveWindow.Call(uintptr(hwndTab), tabPadding, tabPadding, uintptr(tabWidth), uintptr(tabHeight), 1)
 
+	clientW := client.right - client.left
+	parts := [3]int32{clientW / 4, clientW / 2, -1}
+	procSendMessage.Call(uintptr(hwndStatus), sbSetParts, uintptr(len(parts)), uintptr(unsafe.Pointer(&parts[0])))
+
 	layoutAppList()
 	layoutProcList()
 	layoutPerfView()
 	layoutNetView()
+}
+
+// updateStatusBar fills the Processes / CPU Usage / Commit Charge panes from the
+// perf data gathered by refreshPerfData.
+func updateStatusBar() {
+	if hwndStatus == 0 {
+		return
+	}
+	setPart := func(i int, text string) {
+		t, _ := syscall.UTF16PtrFromString(text)
+		procSendMessage.Call(uintptr(hwndStatus), sbSetTextW, uintptr(i), uintptr(unsafe.Pointer(t)))
+	}
+	pageKB := uint64(perfStats.pageSize) / 1024
+	setPart(0, fmt.Sprintf("Processes: %d", perfStats.processCount))
+	setPart(1, fmt.Sprintf("CPU Usage: %d%%", currentCPUUsage))
+	setPart(2, fmt.Sprintf("Commit Charge: %dK / %dK", uint64(perfStats.commitTotal)*pageKB, uint64(perfStats.commitLimit)*pageKB))
 }
 
 // createMessageFont builds the current system UI font (e.g. Segoe UI) so controls
@@ -550,6 +571,8 @@ func main() {
 	}
 	layoutChildren(syscall.Handle(hwnd))
 	refreshAppList()
+	refreshPerfData()
+	updateStatusBar()
 
 	procShowWindow.Call(hwnd, swShowDefault)
 	procUpdateWindow.Call(hwnd)
