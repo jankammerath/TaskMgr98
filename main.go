@@ -934,10 +934,15 @@ func logCrash(r interface{}) {
 }
 
 // loadEmbeddedIcon loads the icon embedded via rsrc.syso (see build.ps1/build.sh);
-// rsrc assigns the icon group resource ID 1 when no manifest is passed to it.
+// with -manifest passed to rsrc the manifest takes resource ID 1 and the icon
+// group gets ID 2, so try 2 first and fall back to 1 for manifest-less builds.
 func loadEmbeddedIcon(hInstance uintptr) syscall.Handle {
-	h, _, _ := procLoadIcon.Call(hInstance, uintptr(1))
-	return syscall.Handle(h)
+	for _, id := range []uintptr{2, 1} {
+		if h, _, _ := procLoadIcon.Call(hInstance, id); h != 0 {
+			return syscall.Handle(h)
+		}
+	}
+	return 0
 }
 
 // loadTaskManagerIcon extracts the real Task Manager icon out of system32\taskmgr.exe,

@@ -1,6 +1,6 @@
 #!/bin/bash
-#!/bin/bash
 set -e
-# rsrc runs on the host (macOS); -arch picks the target COFF machine type for the .syso.
-go run github.com/akavel/rsrc@latest -arch arm64 -ico media/icon.ico -o rsrc_windows_arm64.syso
+# goversioninfo runs on the host (macOS) and embeds VERSIONINFO + icon + manifest
+# (see versioninfo.json); -64 -arm together produce an arm64 COFF .syso.
+go run github.com/josephspurrier/goversioninfo/cmd/goversioninfo@latest -64 -arm -o rsrc_windows_arm64.syso versioninfo.json
 GOOS=windows GOARCH=arm64 go build -buildvcs=false -ldflags "-H=windowsgui" -o TaskMgr98.exe .
