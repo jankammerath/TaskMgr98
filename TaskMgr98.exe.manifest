@@ -3,10 +3,10 @@
   <assemblyIdentity
     version="1.0.0.0"
     processorArchitecture="*"
-    name="WinGo.App"
+    name="TaskMgr98.App"
     type="win32"
   />
-  <description>WinGo</description>
+  <description>Task Manager 98</description>
   <dependency>
     <dependentAssembly>
       <assemblyIdentity

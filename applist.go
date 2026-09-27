@@ -373,6 +373,24 @@ func selectedEntry() (appEntry, bool) {
 	return currentEntries[idx], true
 }
 
+// selectedTaskHwnds returns the window handles of all selected tasks.
+func selectedTaskHwnds() []syscall.Handle {
+	var hwnds []syscall.Handle
+	idx := int32(-1)
+	for {
+		sel, _, _ := procSendMessage.Call(uintptr(hwndAppList), lvmGetNextItem, uintptr(idx), lvniSelected)
+		i := int32(sel)
+		if i < 0 {
+			break
+		}
+		if int(i) < len(currentEntries) {
+			hwnds = append(hwnds, currentEntries[i].hwnd)
+		}
+		idx = i
+	}
+	return hwnds
+}
+
 // refreshAppList re-enumerates top-level application windows, repopulates the list,
 // and restores the previous selection (by window handle) so it survives the refresh.
 func refreshAppList() {

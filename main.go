@@ -73,8 +73,20 @@ const (
 	idViewLargeIcons = 1012 // view mode ids must stay contiguous too
 	idViewSmallIcons = 1013
 	idViewDetails    = 1014
+	idWinTileHorz    = 1015
+	idWinTileVert    = 1016
+	idWinMinimize    = 1017
+	idWinMaximize    = 1018
+	idWinCascade     = 1019
+	idWinBringFront  = 1020
 	idAppListTimer   = 1
 	timerIntervalMs  = 1500
+
+	wmInitMenuPopup = 0x0117
+	mfGrayed        = 0x00000001
+	swMaximize      = 3
+	mdiTileVert     = 0x0000 // MDITILE_VERTICAL
+	mdiTileHorz     = 0x0001 // MDITILE_HORIZONTAL
 
 	lvsTypeMask  = 0x0003
 	lvsIcon      = 0x0000
@@ -236,6 +248,12 @@ var (
 	procKillTimer          = user32.NewProc("KillTimer")
 	procSetWindowLongW     = user32.NewProc("SetWindowLongW")
 	procRemoveMenu         = user32.NewProc("RemoveMenu")
+	procInsertMenu         = user32.NewProc("InsertMenuW")
+	procDrawMenuBar        = user32.NewProc("DrawMenuBar")
+	procEnableMenuItem     = user32.NewProc("EnableMenuItem")
+	procTileWindows        = user32.NewProc("TileWindows")
+	procCascadeWindows     = user32.NewProc("CascadeWindows")
+	procBringWindowToTop   = user32.NewProc("BringWindowToTop")
 )
 
 // hwndTab and hwndStatus are set once in main and read by wndProc for layout.
@@ -245,6 +263,8 @@ var (
 
 	hMainMenu         uintptr
 	hViewMenu         uintptr
+	hWindowsMenu      uintptr
+	windowsMenuShown  bool
 	appViewItemsShown bool
 	appViewMode       = uintptr(idViewDetails) // Details is the startup default
 	minimizeOnUse     bool
@@ -314,6 +334,7 @@ func wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr) (resul
 			showPerfView(int32(sel) == 2)
 			showNetView(int32(sel) == 3)
 			updateAppViewMenu(int32(sel) == 0)
+			updateWindowsMenu(hwnd, int32(sel) == 0)
 		case hdr.hwndFrom == hwndAppList && hdr.code == lvnColumnClick:
 			nmlv := *(**nmListView)(unsafe.Pointer(&lParam))
 			setAppSortColumn(nmlv.iSubItem)
@@ -322,6 +343,11 @@ func wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr) (resul
 			setProcSortColumn(nmlv.iSubItem)
 		}
 		return 0
+	case wmInitMenuPopup:
+		if wParam == hWindowsMenu {
+			updateWindowsMenuEnables()
+			return 0
+		}
 	case wmCommand:
 		switch wParam & 0xFFFF {
 		case idFileExit:
@@ -388,6 +414,9 @@ func wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr) (resul
 			return 0
 		case idViewLargeIcons, idViewSmallIcons, idViewDetails:
 			setAppViewMode(wParam & 0xFFFF)
+			return 0
+		case idWinTileHorz, idWinTileVert, idWinMinimize, idWinMaximize, idWinCascade, idWinBringFront:
+			runWindowsMenuAction(wParam & 0xFFFF)
 			return 0
 		}
 	}
@@ -473,6 +502,70 @@ func setAppViewMode(id uintptr) {
 		procCheckMenuRadioItem.Call(hMainMenu, idViewLargeIcons, idViewDetails, id, 0)
 	}
 	refreshAppList()
+}
+
+// updateWindowsMenu inserts or removes the Applications-only Windows menu at bar
+// position 3 (between View and Help); RemoveMenu keeps the popup alive for reuse.
+func updateWindowsMenu(hwnd syscall.Handle, show bool) {
+	if hMainMenu == 0 || show == windowsMenuShown {
+		return
+	}
+	if show {
+		label, _ := syscall.UTF16PtrFromString("Windows")
+		procInsertMenu.Call(hMainMenu, 3, mfByPosition|mfPopup, hWindowsMenu, uintptr(unsafe.Pointer(label)))
+	} else {
+		procRemoveMenu.Call(hMainMenu, 3, mfByPosition)
+	}
+	windowsMenuShown = show
+	procDrawMenuBar.Call(uintptr(hwnd))
+}
+
+// updateWindowsMenuEnables grays the items based on how many tasks are selected:
+// tile/cascade need at least two windows, the rest need one.
+func updateWindowsMenuEnables() {
+	n := len(selectedTaskHwnds())
+	enable := func(id uintptr, on bool) {
+		flags := uintptr(mfGrayed)
+		if on {
+			flags = 0 // MF_ENABLED
+		}
+		procEnableMenuItem.Call(hWindowsMenu, id, flags) // MF_BYCOMMAND
+	}
+	enable(idWinTileHorz, n >= 2)
+	enable(idWinTileVert, n >= 2)
+	enable(idWinCascade, n >= 2)
+	enable(idWinMinimize, n >= 1)
+	enable(idWinMaximize, n >= 1)
+	enable(idWinBringFront, n >= 1)
+}
+
+func runWindowsMenuAction(id uintptr) {
+	hwnds := selectedTaskHwnds()
+	if len(hwnds) == 0 {
+		return
+	}
+	switch id {
+	case idWinTileHorz, idWinTileVert:
+		flag := uintptr(mdiTileHorz)
+		if id == idWinTileVert {
+			flag = mdiTileVert
+		}
+		procTileWindows.Call(0, flag, 0, uintptr(len(hwnds)), uintptr(unsafe.Pointer(&hwnds[0])))
+	case idWinCascade:
+		procCascadeWindows.Call(0, 0, 0, uintptr(len(hwnds)), uintptr(unsafe.Pointer(&hwnds[0])))
+	case idWinMinimize:
+		for _, h := range hwnds {
+			procShowWindow.Call(uintptr(h), swMinimize)
+		}
+	case idWinMaximize:
+		for _, h := range hwnds {
+			procShowWindow.Call(uintptr(h), swMaximize)
+		}
+	case idWinBringFront:
+		for _, h := range hwnds {
+			procBringWindowToTop.Call(uintptr(h))
+		}
+	}
 }
 
 // layoutChildren positions the tab control to fill the client area above the status bar.
@@ -585,9 +678,24 @@ func createMenuBar(hwnd syscall.Handle) {
 		menuItem{0, "-"},
 		menuItem{idHelpAbout, "About Task Manager 98"})
 
+	winPopup, _, _ := procCreatePopupMenu.Call()
+	for _, item := range []menuItem{
+		{idWinTileHorz, "Tile Horizontally"},
+		{idWinTileVert, "Tile Vertically"},
+		{idWinMinimize, "Minimize"},
+		{idWinMaximize, "Maximize"},
+		{idWinCascade, "Cascade"},
+		{idWinBringFront, "Bring To Front"},
+	} {
+		itemText, _ := syscall.UTF16PtrFromString(item.text)
+		procAppendMenu.Call(winPopup, mfString, item.id, uintptr(unsafe.Pointer(itemText)))
+	}
+	hWindowsMenu = winPopup
+
 	hMainMenu = hMenuBar
 	procCheckMenuRadioItem.Call(hMainMenu, idViewSpeedHigh, idViewSpeedPause, idViewSpeedNorm, 0)
-	updateAppViewMenu(true) // Applications is the startup tab
+	updateAppViewMenu(true)       // Applications is the startup tab
+	updateWindowsMenu(hwnd, true) // ditto
 	procSetMenu.Call(uintptr(hwnd), hMenuBar)
 }
 
