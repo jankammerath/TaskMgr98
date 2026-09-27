@@ -106,8 +106,8 @@ func showAboutDialog(owner syscall.Handle) {
 	procSendMessage.Call(uintptr(iconStatic), stmSetIcon, icon, 0)
 
 	makeStatic("Task Manager 98", 0, 72, 20, 320, 18)
-	makeStatic("Version 1.0", 0, 72, 40, 320, 18)
-	makeStatic("Copyright (C) Jan Kamerath 1985-2026", 0, 72, 60, 320, 18)
+	makeStatic("Version 1.2026.10.1", 0, 72, 40, 320, 18)
+	makeStatic("Copyright © Jan Kamerath 1985-2026", 0, 72, 60, 320, 18)
 
 	makeStatic("", ssEtchedHorz, 72, 118, dlgW-72-20, 2)
 
@@ -121,7 +121,7 @@ func showAboutDialog(owner syscall.Handle) {
 		uintptr(unsafe.Pointer(btnClass)),
 		uintptr(unsafe.Pointer(okText)),
 		uintptr(wsChild|wsVisible|wsTabStop|bsPushButton),
-		dlgW-80-16, dlgH-60, 80, 24,
+		dlgW-80-16, dlgH-32, 80, 24,
 		uintptr(hwndAbout), idAboutOK, hInstance, 0,
 	)
 
