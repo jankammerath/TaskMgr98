@@ -65,6 +65,17 @@ type performanceInformation struct {
 	threadCount       uint32
 }
 
+// sysProcPerfInfo mirrors SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION (class 8).
+type sysProcPerfInfo struct {
+	idleTime       int64
+	kernelTime     int64 // includes idle time
+	userTime       int64
+	dpcTime        int64
+	interruptTime  int64
+	interruptCount uint32
+	_              uint32
+}
+
 var (
 	procBeginPaint             = user32.NewProc("BeginPaint")
 	procEndPaint               = user32.NewProc("EndPaint")
@@ -83,6 +94,9 @@ var (
 	psapiDll               = syscall.NewLazyDLL("psapi.dll")
 	procGetPerformanceInfo = psapiDll.NewProc("GetPerformanceInfo")
 	procGetSystemTimes     = kernel32.NewProc("GetSystemTimes")
+
+	ntdll                        = syscall.NewLazyDLL("ntdll.dll")
+	procNtQuerySystemInformation = ntdll.NewProc("NtQuerySystemInformation")
 
 	procEnumChildWindows = user32.NewProc("EnumChildWindows")
 	perfFontCallback     = syscall.NewCallback(setPerfChildFontProc)
@@ -113,12 +127,23 @@ var (
 	prevSysKernel fileTime
 	prevSysUser   fileTime
 
-	currentCPUUsage  = 0
-	currentPFUsageMB = 0
-	limitPFMB        = 0
+	currentCPUUsage    = 0
+	currentKernelUsage = 0
+	currentPFUsageMB   = 0
+	limitPFMB          = 0
 
-	cpuHistory = make([]int, 0, 200)
-	pfHistory  = make([]int, 0, 200)
+	cpuHistory    = make([]int, 0, 200)
+	kernelHistory = make([]int, 0, 200)
+	pfHistory     = make([]int, 0, 200)
+
+	// per-logical-CPU histories for "One Graph Per CPU"
+	cpuHistories    [][]int
+	kernelHistories [][]int
+	prevCPUPerf     []sysProcPerfInfo
+	havePrevCPUPerf bool
+
+	cpuHistoryPerCPU = true  // View > CPU History radio
+	showKernelTimes  = false // View > Show Kernel Times
 
 	perfClassRegistered = false
 	perfViewVisible     = false
@@ -383,6 +408,9 @@ func refreshPerfData() {
 				if currentCPUUsage > 100 {
 					currentCPUUsage = 100
 				}
+				// kernelDiff includes idle time; subtract it for busy kernel time.
+				kernelBusy := max(kernelDiff-idleDiff, 0)
+				currentKernelUsage = min(int((kernelBusy*100)/totalSys), 100)
 			}
 		}
 		prevSysIdle = idle
@@ -427,6 +455,11 @@ func refreshPerfData() {
 	if len(cpuHistory) > 300 {
 		cpuHistory = cpuHistory[1:]
 	}
+	kernelHistory = append(kernelHistory, currentKernelUsage)
+	if len(kernelHistory) > 300 {
+		kernelHistory = kernelHistory[1:]
+	}
+	refreshPerCPUData()
 
 	pfPercent := 0
 	if limitPFMB > 0 {
@@ -442,6 +475,58 @@ func refreshPerfData() {
 	procInvalidateRect.Call(uintptr(hwndCPUHist), 0, 0)
 	procInvalidateRect.Call(uintptr(hwndPFMeter), 0, 0)
 	procInvalidateRect.Call(uintptr(hwndPFHist), 0, 0)
+}
+
+// refreshPerCPUData samples per-logical-CPU busy/kernel percentages via
+// NtQuerySystemInformation(SystemProcessorPerformanceInformation).
+func refreshPerCPUData() {
+	var buf [64]sysProcPerfInfo
+	var retLen uint32
+	status, _, _ := procNtQuerySystemInformation.Call(
+		8, // SystemProcessorPerformanceInformation
+		uintptr(unsafe.Pointer(&buf[0])),
+		unsafe.Sizeof(buf),
+		uintptr(unsafe.Pointer(&retLen)),
+	)
+	if status != 0 {
+		return
+	}
+	n := int(retLen / uint32(unsafe.Sizeof(buf[0])))
+	if n == 0 {
+		return
+	}
+
+	if len(cpuHistories) != n {
+		cpuHistories = make([][]int, n)
+		kernelHistories = make([][]int, n)
+		prevCPUPerf = make([]sysProcPerfInfo, n)
+		havePrevCPUPerf = false
+	}
+
+	if havePrevCPUPerf {
+		for i := 0; i < n; i++ {
+			idleDiff := buf[i].idleTime - prevCPUPerf[i].idleTime
+			kernelDiff := buf[i].kernelTime - prevCPUPerf[i].kernelTime
+			userDiff := buf[i].userTime - prevCPUPerf[i].userTime
+			total := kernelDiff + userDiff
+
+			busyPct, kernelPct := 0, 0
+			if total > 0 {
+				busyPct = min(int(max(total-idleDiff, 0)*100/total), 100)
+				kernelPct = min(int(max(kernelDiff-idleDiff, 0)*100/total), 100)
+			}
+			cpuHistories[i] = append(cpuHistories[i], busyPct)
+			if len(cpuHistories[i]) > 300 {
+				cpuHistories[i] = cpuHistories[i][1:]
+			}
+			kernelHistories[i] = append(kernelHistories[i], kernelPct)
+			if len(kernelHistories[i]) > 300 {
+				kernelHistories[i] = kernelHistories[i][1:]
+			}
+		}
+	}
+	copy(prevCPUPerf, buf[:n])
+	havePrevCPUPerf = true
 }
 
 func perfGraphWndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr) (result uintptr) {
@@ -474,17 +559,28 @@ func perfGraphWndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintpt
 
 		switch id {
 		case 1: // CPU Bar Meter
-			drawBarMeter(memDC, rc, currentCPUUsage, fmt.Sprintf("%d %%", currentCPUUsage))
-		case 2: // CPU History Chart
-			drawHistoryGraph(memDC, rc, cpuHistory, 0x0000FF00)
+			drawBarMeter(memDC, rc, currentCPUUsage, currentKernelUsage, fmt.Sprintf("%d %%", currentCPUUsage))
+		case 2: // CPU History Chart(s)
+			n := len(cpuHistories)
+			if cpuHistoryPerCPU && n > 1 {
+				gap := int32(4)
+				subW := (w - gap*int32(n-1)) / int32(n)
+				for i := 0; i < n; i++ {
+					left := int32(i) * (subW + gap)
+					sub := rect{left: left, top: 0, right: left + subW, bottom: h}
+					drawHistoryGraph(memDC, sub, cpuHistories[i], kernelHistories[i], 0x0000FF00)
+				}
+			} else {
+				drawHistoryGraph(memDC, rc, cpuHistory, kernelHistory, 0x0000FF00)
+			}
 		case 3: // PF Bar Meter
 			pfPct := 0
 			if limitPFMB > 0 {
 				pfPct = (currentPFUsageMB * 100) / limitPFMB
 			}
-			drawBarMeter(memDC, rc, pfPct, fmt.Sprintf("%d MB", currentPFUsageMB))
+			drawBarMeter(memDC, rc, pfPct, 0, fmt.Sprintf("%d MB", currentPFUsageMB))
 		case 4: // PF History Chart
-			drawHistoryGraph(memDC, rc, pfHistory, 0x0000FF00)
+			drawHistoryGraph(memDC, rc, pfHistory, nil, 0x0000FF00)
 		}
 
 		procBitBlt.Call(hdc, 0, 0, uintptr(w), uintptr(h), memDC, 0, 0, 0x00CC0020) // SRCCOPY
@@ -500,7 +596,7 @@ func perfGraphWndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintpt
 	return ret
 }
 
-func drawBarMeter(hdc uintptr, rc rect, percent int, label string) {
+func drawBarMeter(hdc uintptr, rc rect, percent, kernelPercent int, label string) {
 	if percent < 0 {
 		percent = 0
 	}
@@ -527,9 +623,14 @@ func drawBarMeter(hdc uintptr, rc rect, percent int, label string) {
 	segHeight := (meterHeight - (numSegments-1)*segGap) / numSegments
 
 	litSegments := int32((int64(percent)*int64(numSegments) + 50) / 100)
+	kernelSegments := int32(0)
+	if showKernelTimes && kernelPercent > 0 {
+		kernelSegments = min(int32((int64(kernelPercent)*int64(numSegments)+50)/100), litSegments)
+	}
 
 	litBrush, _, _ := procCreateSolidBrush.Call(0x0000E000)  // Bright Green
 	darkBrush, _, _ := procCreateSolidBrush.Call(0x00003000) // Faint Green
+	redBrush, _, _ := procCreateSolidBrush.Call(0x000000E0)  // Kernel time red
 	sepBrush, _, _ := procCreateSolidBrush.Call(0x00000000)  // Black separator
 
 	sepX := meterLeft + (meterRight-meterLeft)/2
@@ -540,9 +641,12 @@ func drawBarMeter(hdc uintptr, rc rect, percent int, label string) {
 		segY1 := segY2 - segHeight
 
 		segRect := rect{left: meterLeft, top: segY1, right: meterRight, bottom: segY2}
-		if i < litSegments {
+		switch {
+		case i < kernelSegments:
+			procFillRect.Call(hdc, uintptr(unsafe.Pointer(&segRect)), redBrush)
+		case i < litSegments:
 			procFillRect.Call(hdc, uintptr(unsafe.Pointer(&segRect)), litBrush)
-		} else {
+		default:
 			procFillRect.Call(hdc, uintptr(unsafe.Pointer(&segRect)), darkBrush)
 		}
 
@@ -553,6 +657,7 @@ func drawBarMeter(hdc uintptr, rc rect, percent int, label string) {
 
 	procDeleteObject.Call(litBrush)
 	procDeleteObject.Call(darkBrush)
+	procDeleteObject.Call(redBrush)
 	procDeleteObject.Call(sepBrush)
 
 	// Draw percentage/MB label at bottom
@@ -574,8 +679,7 @@ func drawBarMeter(hdc uintptr, rc rect, percent int, label string) {
 	procDeleteObject.Call(font)
 }
 
-func drawHistoryGraph(hdc uintptr, rc rect, values []int, lineColor uint32) {
-	w := rc.right - rc.left
+func drawHistoryGraph(hdc uintptr, rc rect, values, kernelValues []int, lineColor uint32) {
 	h := rc.bottom - rc.top
 
 	// Dark green grid pen
@@ -585,47 +689,47 @@ func drawHistoryGraph(hdc uintptr, rc rect, values []int, lineColor uint32) {
 	gridSpacing := int32(12)
 
 	// Vertical grid lines
-	for x := w - 1; x >= 0; x -= gridSpacing {
-		procMoveToEx.Call(hdc, uintptr(x), 0, 0)
-		procLineTo.Call(hdc, uintptr(x), uintptr(h))
+	for x := rc.right - 1; x >= rc.left; x -= gridSpacing {
+		procMoveToEx.Call(hdc, uintptr(x), uintptr(rc.top), 0)
+		procLineTo.Call(hdc, uintptr(x), uintptr(rc.bottom))
 	}
 
 	// Horizontal grid lines
-	for y := h - 1; y >= 0; y -= gridSpacing {
-		procMoveToEx.Call(hdc, uintptr(0), uintptr(y), 0)
-		procLineTo.Call(hdc, uintptr(w), uintptr(y))
+	for y := rc.bottom - 1; y >= rc.top; y -= gridSpacing {
+		procMoveToEx.Call(hdc, uintptr(rc.left), uintptr(y), 0)
+		procLineTo.Call(hdc, uintptr(rc.right), uintptr(y))
 	}
 
-	// Draw bright green trend curve
-	trendPen, _, _ := procCreatePen.Call(psSolid, 1, uintptr(lineColor))
-	procSelectObject.Call(hdc, trendPen)
+	plot := func(vals []int, color uint32) {
+		pen, _, _ := procCreatePen.Call(psSolid, 1, uintptr(color))
+		procSelectObject.Call(hdc, pen)
 
-	step := gridSpacing
-	count := len(values)
+		count := len(vals)
+		for i := 0; i < count; i++ {
+			val := min(max(vals[count-1-i], 0), 100)
 
-	for i := 0; i < count; i++ {
-		val := values[count-1-i]
-		if val < 0 {
-			val = 0
-		}
-		if val > 100 {
-			val = 100
+			x := (rc.right - 1) - int32(i)*gridSpacing
+			if x < rc.left {
+				break
+			}
+			y := (rc.bottom - 1) - int32((int64(val)*int64(h-2))/100)
+
+			if i == 0 {
+				procMoveToEx.Call(hdc, uintptr(x), uintptr(y), 0)
+			} else {
+				procLineTo.Call(hdc, uintptr(x), uintptr(y))
+			}
 		}
 
-		x := (w - 1) - int32(i)*step
-		if x < 0 {
-			break
-		}
-		y := (h - 1) - int32((int64(val)*int64(h-2))/100)
+		procSelectObject.Call(hdc, oldPen)
+		procDeleteObject.Call(pen)
+	}
 
-		if i == 0 {
-			procMoveToEx.Call(hdc, uintptr(x), uintptr(y), 0)
-		} else {
-			procLineTo.Call(hdc, uintptr(x), uintptr(y))
-		}
+	plot(values, lineColor)
+	if showKernelTimes && len(kernelValues) > 0 {
+		plot(kernelValues, 0x000000E0) // kernel time red
 	}
 
 	procSelectObject.Call(hdc, oldPen)
 	procDeleteObject.Call(gridPen)
-	procDeleteObject.Call(trendPen)
 }

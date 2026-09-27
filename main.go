@@ -80,6 +80,9 @@ const (
 	idWinCascade     = 1019
 	idWinBringFront  = 1020
 	idViewSelectCols = 1021
+	idViewCPUHistAll = 1022 // contiguous with per-CPU id for CheckMenuRadioItem
+	idViewCPUHistPer = 1023
+	idViewKernelTime = 1024
 	idAppListTimer   = 1
 	timerIntervalMs  = 1500
 
@@ -268,6 +271,8 @@ var (
 	windowsMenuShown   bool
 	appViewItemsShown  bool
 	procViewItemsShown bool
+	perfViewItemsShown bool
+	hCPUHistMenu       uintptr
 	appViewMode        = uintptr(idViewDetails) // Details is the startup default
 	minimizeOnUse      bool
 	hideWhenMinimized  bool
@@ -338,6 +343,7 @@ func wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr) (resul
 			updateAppViewMenu(int32(sel) == 0)
 			updateWindowsMenu(hwnd, int32(sel) == 0)
 			updateProcViewMenu(int32(sel) == 1)
+			updatePerfViewMenu(int32(sel) == 2)
 		case hdr.hwndFrom == hwndAppList && hdr.code == lvnColumnClick:
 			nmlv := *(**nmListView)(unsafe.Pointer(&lParam))
 			setAppSortColumn(nmlv.iSubItem)
@@ -424,6 +430,17 @@ func wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr) (resul
 		case idViewSelectCols:
 			showColumnsDialog(hwnd)
 			return 0
+		case idViewCPUHistAll, idViewCPUHistPer:
+			cpuHistoryPerCPU = wParam&0xFFFF == idViewCPUHistPer
+			syncPerfViewMenuChecks()
+			procInvalidateRect.Call(uintptr(hwndCPUHist), 0, 0)
+			return 0
+		case idViewKernelTime:
+			showKernelTimes = !showKernelTimes
+			syncPerfViewMenuChecks()
+			procInvalidateRect.Call(uintptr(hwndCPUHist), 0, 0)
+			procInvalidateRect.Call(uintptr(hwndCPUMeter), 0, 0)
+			return 0
 		}
 	}
 	ret, _, _ := procDefWindowProc.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
@@ -500,6 +517,53 @@ func updateProcViewMenu(show bool) {
 		}
 	}
 	procViewItemsShown = show
+}
+
+// updatePerfViewMenu appends or removes the Performance-only items (separator,
+// CPU History submenu, Show Kernel Times) at positions 2-4.
+func updatePerfViewMenu(show bool) {
+	if hViewMenu == 0 || show == perfViewItemsShown {
+		return
+	}
+	if show {
+		if hCPUHistMenu == 0 {
+			hCPUHistMenu, _, _ = procCreatePopupMenu.Call()
+			if numCPUs > 1 {
+				t, _ := syscall.UTF16PtrFromString("One Graph, All CPUs")
+				procAppendMenu.Call(hCPUHistMenu, mfString, idViewCPUHistAll, uintptr(unsafe.Pointer(t)))
+			}
+			t, _ := syscall.UTF16PtrFromString("One Graph Per CPU")
+			procAppendMenu.Call(hCPUHistMenu, mfString, idViewCPUHistPer, uintptr(unsafe.Pointer(t)))
+		}
+		procAppendMenu.Call(hViewMenu, mfSeparator, 0, 0)
+		histLabel, _ := syscall.UTF16PtrFromString("CPU History")
+		procAppendMenu.Call(hViewMenu, mfPopup, hCPUHistMenu, uintptr(unsafe.Pointer(histLabel)))
+		kernelLabel, _ := syscall.UTF16PtrFromString("Show Kernel Times")
+		procAppendMenu.Call(hViewMenu, mfString, idViewKernelTime, uintptr(unsafe.Pointer(kernelLabel)))
+		syncPerfViewMenuChecks()
+	} else {
+		for pos := 4; pos >= 2; pos-- {
+			procRemoveMenu.Call(hViewMenu, uintptr(pos), mfByPosition)
+		}
+	}
+	perfViewItemsShown = show
+}
+
+// syncPerfViewMenuChecks moves the CPU History radio and Show Kernel Times check.
+func syncPerfViewMenuChecks() {
+	if hCPUHistMenu == 0 {
+		return
+	}
+	sel := uintptr(idViewCPUHistAll)
+	if cpuHistoryPerCPU {
+		sel = idViewCPUHistPer
+	}
+	procCheckMenuRadioItem.Call(hCPUHistMenu, idViewCPUHistAll, idViewCPUHistPer, sel, 0)
+	flags := uintptr(0)
+	if showKernelTimes {
+		flags = mfChecked
+	}
+	procCheckMenuItem.Call(hViewMenu, idViewKernelTime, flags)
 }
 
 // setAppViewMode switches the Applications list between icon/small icon/report view.
