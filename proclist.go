@@ -88,18 +88,45 @@ type systemInfo struct {
 	wProcessorRevision          uint16
 }
 
-// procTimes captures a process's kernel+user CPU time for CPU% delta calculation.
+// procTimes captures per-process values from the previous refresh for delta columns.
 type procTimes struct {
 	kernel, user uint64
+	memKB        uint64
+	pageFaults   uint32
+}
+
+// ioCounters mirrors IO_COUNTERS.
+type ioCounters struct {
+	readOps, writeOps, otherOps       uint64
+	readBytes, writeBytes, otherBytes uint64
 }
 
 // procEntry is one row backing the Processes tab.
 type procEntry struct {
-	pid        uint32
-	image      string
-	user       string
-	cpuPercent int
-	memKB      uint64
+	pid             uint32
+	image           string
+	user            string
+	cpuPercent      int
+	cpuTimeTicks    uint64
+	memKB           uint64
+	memDeltaKB      int64
+	peakMemKB       uint64
+	pageFaults      uint32
+	pageFaultsDelta int64
+	vmSizeKB        uint64
+	pagedPoolKB     uint64
+	nonPagedPoolKB  uint64
+	basePriority    int32
+	handleCount     uint32
+	threadCount     uint32
+	userObjects     uint32
+	gdiObjects      uint32
+	ioReads         uint64
+	ioReadBytes     uint64
+	ioWrites        uint64
+	ioWriteBytes    uint64
+	ioOther         uint64
+	ioOtherBytes    uint64
 }
 
 var (
@@ -109,6 +136,9 @@ var (
 	procGetProcessTimes          = kernel32.NewProc("GetProcessTimes")
 	procGetSystemInfo            = kernel32.NewProc("GetSystemInfo")
 	procTerminateProcess         = kernel32.NewProc("TerminateProcess")
+	procGetProcessHandleCount    = kernel32.NewProc("GetProcessHandleCount")
+	procGetProcessIoCounters     = kernel32.NewProc("GetProcessIoCounters")
+	procGetGuiResources          = user32.NewProc("GetGuiResources")
 
 	psapi                    = syscall.NewLazyDLL("psapi.dll")
 	procGetProcessMemoryInfo = psapi.NewProc("GetProcessMemoryInfo")
@@ -147,21 +177,15 @@ func setProcSortColumn(col int32) {
 	refreshProcList()
 }
 
-// sortProcEntries orders entries by the clicked column (Image Name/User Name/CPU/Mem
-// Usage), honoring procSortColumn/procSortAscending.
+// sortProcEntries orders entries by the clicked column, honoring
+// procSortColumn/procSortAscending; the index maps into the enabled column set.
 func sortProcEntries(entries []procEntry) {
-	less := func(i, j int) bool {
-		switch procSortColumn {
-		case 1:
-			return entries[i].user < entries[j].user
-		case 2:
-			return entries[i].cpuPercent < entries[j].cpuPercent
-		case 3:
-			return entries[i].memKB < entries[j].memKB
-		default:
-			return entries[i].image < entries[j].image
-		}
+	cols := enabledProcColumns()
+	colLess := cols[0].less
+	if int(procSortColumn) < len(cols) && procSortColumn >= 0 {
+		colLess = cols[procSortColumn].less
 	}
+	less := func(i, j int) bool { return colLess(&entries[i], &entries[j]) }
 	sort.SliceStable(entries, func(i, j int) bool {
 		if procSortAscending {
 			return less(i, j)
@@ -184,23 +208,10 @@ func createProcListView(hwndParent syscall.Handle, hInstance uintptr) syscall.Ha
 	)
 	list := syscall.Handle(h)
 
-	procSendMessage.Call(uintptr(list), lvmSetExtendedListViewStyle, 0, lvsExFullRowSelect)
+	procSendMessage.Call(uintptr(list), lvmSetExtendedListViewStyle, 0, lvsExFullRowSelect|lvsExHeaderDragDrop)
 
-	addColumn := func(index int32, label string, width int32) {
-		text, _ := syscall.UTF16PtrFromString(label)
-		col := lvColumnW{
-			mask:     lvcfFmt | lvcfWidth | lvcfText | lvcfSubItem,
-			fmt:      lvcfmtLeft,
-			cx:       width,
-			pszText:  text,
-			iSubItem: index,
-		}
-		procSendMessage.Call(uintptr(list), lvmInsertColumnW, uintptr(index), uintptr(unsafe.Pointer(&col)))
-	}
-	addColumn(0, "Image Name", 160)
-	addColumn(1, "User Name", 110)
-	addColumn(2, "CPU", 50)
-	addColumn(3, "Mem Usage", 90)
+	hwndProcList = list
+	rebuildProcColumns()
 
 	var si systemInfo
 	procGetSystemInfo.Call(uintptr(unsafe.Pointer(&si)))
@@ -402,7 +413,10 @@ func enumerateProcesses() []procEntry {
 	for ok != 0 {
 		pid := pe.th32ProcessID
 		seen[pid] = true
-		entries = append(entries, buildProcEntry(pid, syscall.UTF16ToString(pe.szExeFile[:])))
+		entry := buildProcEntry(pid, syscall.UTF16ToString(pe.szExeFile[:]))
+		entry.threadCount = pe.cntThreads
+		entry.basePriority = pe.pcPriClassBase
+		entries = append(entries, entry)
 		ok, _, _ = procProcess32NextW.Call(snap, uintptr(unsafe.Pointer(&pe)))
 	}
 
@@ -426,28 +440,65 @@ func buildProcEntry(pid uint32, image string) procEntry {
 	}
 	defer procCloseHandle.Call(hProc)
 
+	prev, hasPrev := prevProcTimes[pid]
+
 	var creation, exit, kernel, user fileTime
 	if ret, _, _ := procGetProcessTimes.Call(hProc,
 		uintptr(unsafe.Pointer(&creation)), uintptr(unsafe.Pointer(&exit)),
 		uintptr(unsafe.Pointer(&kernel)), uintptr(unsafe.Pointer(&user)),
 	); ret != 0 {
 		total := kernel.ticks() + user.ticks()
-		if prev, ok := prevProcTimes[pid]; ok && numCPUs > 0 {
+		entry.cpuTimeTicks = total
+		if hasPrev && numCPUs > 0 {
 			delta := total - (prev.kernel + prev.user)
-			intervalTicks := uint64(timerIntervalMs) * 10000
+			intervalTicks := uint64(updateIntervalMs) * 10000
 			pct := int(delta * 100 / (intervalTicks * uint64(numCPUs)))
 			if pct > 100 {
 				pct = 100
 			}
 			entry.cpuPercent = pct
 		}
-		prevProcTimes[pid] = procTimes{kernel: kernel.ticks(), user: user.ticks()}
 	}
 
 	var mc processMemoryCounters
 	mc.cb = uint32(unsafe.Sizeof(mc))
 	if ret, _, _ := procGetProcessMemoryInfo.Call(hProc, uintptr(unsafe.Pointer(&mc)), uintptr(mc.cb)); ret != 0 {
 		entry.memKB = uint64(mc.workingSetSize) / 1024
+		entry.peakMemKB = uint64(mc.peakWorkingSetSize) / 1024
+		entry.pageFaults = mc.pageFaultCount
+		entry.vmSizeKB = uint64(mc.pagefileUsage) / 1024
+		entry.pagedPoolKB = uint64(mc.quotaPagedPoolUsage) / 1024
+		entry.nonPagedPoolKB = uint64(mc.quotaNonPagedPoolUsage) / 1024
+		if hasPrev {
+			entry.memDeltaKB = int64(entry.memKB) - int64(prev.memKB)
+			entry.pageFaultsDelta = int64(entry.pageFaults) - int64(prev.pageFaults)
+		}
+	}
+
+	prevProcTimes[pid] = procTimes{
+		kernel:     kernel.ticks(),
+		user:       user.ticks(),
+		memKB:      entry.memKB,
+		pageFaults: entry.pageFaults,
+	}
+
+	var handles uint32
+	procGetProcessHandleCount.Call(hProc, uintptr(unsafe.Pointer(&handles)))
+	entry.handleCount = handles
+
+	userObjs, _, _ := procGetGuiResources.Call(hProc, grUserObjects)
+	gdiObjs, _, _ := procGetGuiResources.Call(hProc, grGdiObjects)
+	entry.userObjects = uint32(userObjs)
+	entry.gdiObjects = uint32(gdiObjs)
+
+	var io ioCounters
+	if ret, _, _ := procGetProcessIoCounters.Call(hProc, uintptr(unsafe.Pointer(&io))); ret != 0 {
+		entry.ioReads = io.readOps
+		entry.ioReadBytes = io.readBytes
+		entry.ioWrites = io.writeOps
+		entry.ioWriteBytes = io.writeBytes
+		entry.ioOther = io.otherOps
+		entry.ioOtherBytes = io.otherBytes
 	}
 
 	entry.user = lookupProcessOwner(hProc)
@@ -521,18 +572,19 @@ func formatKB(kb uint64) string {
 	return fmt.Sprintf("%s K", out)
 }
 
-// insertProcRow adds one "Image Name | User Name | CPU | Mem Usage" row to the list view.
+// insertProcRow adds one row to the list view, filling every enabled column.
 func insertProcRow(index int32, e procEntry) {
-	imagePtr, _ := syscall.UTF16PtrFromString(e.image)
-	item := lvItemW{mask: lvifText, iItem: index, pszText: imagePtr}
+	cols := enabledProcColumns()
+	if len(cols) == 0 {
+		return
+	}
+	firstPtr, _ := syscall.UTF16PtrFromString(cols[0].value(&e))
+	item := lvItemW{mask: lvifText, iItem: index, pszText: firstPtr}
 	procSendMessage.Call(uintptr(hwndProcList), lvmInsertItemW, 0, uintptr(unsafe.Pointer(&item)))
 
-	setSubItem := func(sub int32, text string) {
-		ptr, _ := syscall.UTF16PtrFromString(text)
-		subItem := lvItemW{mask: lvifText, iItem: index, iSubItem: sub, pszText: ptr}
+	for sub := 1; sub < len(cols); sub++ {
+		ptr, _ := syscall.UTF16PtrFromString(cols[sub].value(&e))
+		subItem := lvItemW{mask: lvifText, iItem: index, iSubItem: int32(sub), pszText: ptr}
 		procSendMessage.Call(uintptr(hwndProcList), lvmSetItemW, 0, uintptr(unsafe.Pointer(&subItem)))
 	}
-	setSubItem(1, e.user)
-	setSubItem(2, fmt.Sprintf("%02d", e.cpuPercent))
-	setSubItem(3, formatKB(e.memKB))
 }

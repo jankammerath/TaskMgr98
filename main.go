@@ -79,6 +79,7 @@ const (
 	idWinMaximize    = 1018
 	idWinCascade     = 1019
 	idWinBringFront  = 1020
+	idViewSelectCols = 1021
 	idAppListTimer   = 1
 	timerIntervalMs  = 1500
 
@@ -261,15 +262,16 @@ var (
 	hwndTab    syscall.Handle
 	hwndStatus syscall.Handle
 
-	hMainMenu         uintptr
-	hViewMenu         uintptr
-	hWindowsMenu      uintptr
-	windowsMenuShown  bool
-	appViewItemsShown bool
-	appViewMode       = uintptr(idViewDetails) // Details is the startup default
-	minimizeOnUse     bool
-	hideWhenMinimized bool
-	updateIntervalMs  = timerIntervalMs // last non-paused timer interval
+	hMainMenu          uintptr
+	hViewMenu          uintptr
+	hWindowsMenu       uintptr
+	windowsMenuShown   bool
+	appViewItemsShown  bool
+	procViewItemsShown bool
+	appViewMode        = uintptr(idViewDetails) // Details is the startup default
+	minimizeOnUse      bool
+	hideWhenMinimized  bool
+	updateIntervalMs   = timerIntervalMs // last non-paused timer interval
 )
 
 // wndProc is invoked directly by Windows (via the syscall.NewCallback registered as
@@ -335,6 +337,7 @@ func wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr) (resul
 			showNetView(int32(sel) == 3)
 			updateAppViewMenu(int32(sel) == 0)
 			updateWindowsMenu(hwnd, int32(sel) == 0)
+			updateProcViewMenu(int32(sel) == 1)
 		case hdr.hwndFrom == hwndAppList && hdr.code == lvnColumnClick:
 			nmlv := *(**nmListView)(unsafe.Pointer(&lParam))
 			setAppSortColumn(nmlv.iSubItem)
@@ -418,6 +421,9 @@ func wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr) (resul
 		case idWinTileHorz, idWinTileVert, idWinMinimize, idWinMaximize, idWinCascade, idWinBringFront:
 			runWindowsMenuAction(wParam & 0xFFFF)
 			return 0
+		case idViewSelectCols:
+			showColumnsDialog(hwnd)
+			return 0
 		}
 	}
 	ret, _, _ := procDefWindowProc.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
@@ -476,6 +482,24 @@ func updateAppViewMenu(show bool) {
 		}
 	}
 	appViewItemsShown = show
+}
+
+// updateProcViewMenu appends or removes the Processes-only "Select Columns..."
+// item (separator + item at positions 2-3 after "Refresh Now" and "Update Speed").
+func updateProcViewMenu(show bool) {
+	if hViewMenu == 0 || show == procViewItemsShown {
+		return
+	}
+	if show {
+		procAppendMenu.Call(hViewMenu, mfSeparator, 0, 0)
+		t, _ := syscall.UTF16PtrFromString("Select Columns...")
+		procAppendMenu.Call(hViewMenu, mfString, idViewSelectCols, uintptr(unsafe.Pointer(t)))
+	} else {
+		for pos := 3; pos >= 2; pos-- {
+			procRemoveMenu.Call(hViewMenu, uintptr(pos), mfByPosition)
+		}
+	}
+	procViewItemsShown = show
 }
 
 // setAppViewMode switches the Applications list between icon/small icon/report view.
