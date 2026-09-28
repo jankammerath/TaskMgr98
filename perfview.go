@@ -242,7 +242,20 @@ func createPerfView(hwndParent syscall.Handle, hInstance uintptr) syscall.Handle
 
 	addStat := func(caption string) syscall.Handle {
 		perfCaptions = append(perfCaptions, makeStatic(hwndPerfContainer, caption, ssLeft))
-		return makeStatic(hwndPerfContainer, "0", ssRight)
+		// Borderless read-only EDIT instead of STATIC so the value is selectable/copyable.
+		const esRight = 0x0002
+		const esReadOnly = 0x0800
+		edClass, _ := syscall.UTF16PtrFromString("EDIT")
+		tPtr, _ := syscall.UTF16PtrFromString("0")
+		h, _, _ := procCreateWindowEx.Call(
+			0,
+			uintptr(unsafe.Pointer(edClass)),
+			uintptr(unsafe.Pointer(tPtr)),
+			uintptr(wsChild|wsVisible|esRight|esReadOnly),
+			0, 0, 0, 0,
+			uintptr(hwndPerfContainer), 0, hInstance, 0,
+		)
+		return syscall.Handle(h)
 	}
 
 	// Totals
@@ -467,7 +480,14 @@ func refreshPerfData() {
 		limitPFMB = int((uint64(pi.commitLimit) * pageSizeKB) / 1024)
 
 		setWinText := func(h syscall.Handle, val uint64) {
-			s, _ := syscall.UTF16PtrFromString(fmt.Sprintf("%d", val))
+			text := fmt.Sprintf("%d", val)
+			// Skip unchanged values so WM_SETTEXT doesn't clear an active selection.
+			var cur [32]uint16
+			n, _, _ := procGetWindowTextW.Call(uintptr(h), uintptr(unsafe.Pointer(&cur[0])), uintptr(len(cur)))
+			if syscall.UTF16ToString(cur[:n]) == text {
+				return
+			}
+			s, _ := syscall.UTF16PtrFromString(text)
 			procSendMessage.Call(uintptr(h), 0x000C, 0, uintptr(unsafe.Pointer(s))) // WM_SETTEXT
 		}
 
