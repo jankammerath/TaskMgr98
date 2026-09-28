@@ -8,13 +8,13 @@ Rewrite of the classic Windows 98, NT4 and Windows XP Task Manager for Windows 1
 
 The fastest and easiest way is to install Task Manager 98 with an installer.
 
-- **[Windows Installer for x64 (Intel and AMD)](/releases/download/2026.9.27/TaskMgr98.x64.20260927.msi)**
-- **[Windows Installer for Arm64 (Qualcomm etc.)](/releases/download/2026.9.27/TaskMgr98.Arm64.20260927.msi)**
+- **[Windows Installer for x64 (Intel and AMD)](https://github.com/jankammerath/TaskMgr98/releases/download/2026.9.27/TaskMgr98.x64.20260927.msi)**
+- **[Windows Installer for Arm64 (Qualcomm etc.)](https://github.com/jankammerath/TaskMgr98/releases/download/2026.9.27/TaskMgr98.Arm64.20260927.msi)**
 
 If you do not want to use an installer, you can download a ZIP-file that contains the EXE-file of Task Manager 98. There are no other files than the EXE-file needed to run Task Manager 98 on Windows 10 and Windows 11.
 
-- [Standalone EXE-file for x64 (Intel and AMD)](/releases/download/2026.9.27/TaskMgr98.x64.20260927.zip)
-- [Standalone EXE-file for Arm64 (Qualcomm etc.)](/releases/download/2026.9.27/TaskMgr98.Arm64.20260927.zip)
+- [Standalone EXE-file for x64 (Intel and AMD)](https://github.com/jankammerath/TaskMgr98/releases/download/2026.9.27/TaskMgr98.x64.20260927.zip)
+- [Standalone EXE-file for Arm64 (Qualcomm etc.)](https://github.com/jankammerath/TaskMgr98/releases/download/2026.9.27/TaskMgr98.Arm64.20260927.zip)
 
 ## Screenshots
 
