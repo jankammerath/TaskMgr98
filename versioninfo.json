@@ -1,7 +1,7 @@
 {
 	"FixedFileInfo": {
-		"FileVersion": { "Major": 2026, "Minor": 9, "Patch": 28, "Build": 0 },
-		"ProductVersion": { "Major": 2026, "Minor": 9, "Patch": 28, "Build": 0 },
+		"FileVersion": { "Major": 1, "Minor": 26, "Patch": 9, "Build": 28 },
+		"ProductVersion": { "Major": 1, "Minor": 26, "Patch": 9, "Build": 28 },
 		"FileFlagsMask": "3f",
 		"FileFlags": "00",
 		"FileOS": "040004",
@@ -11,12 +11,12 @@
 	"StringFileInfo": {
 		"CompanyName": "Jan Kamerath",
 		"FileDescription": "Task Manager 98",
-		"FileVersion": "2026.9.28",
+		"FileVersion": "1.26.9.28",
 		"InternalName": "TaskMgr98",
 		"LegalCopyright": "Copyright (C) Jan Kamerath 1985-2026",
 		"OriginalFilename": "TaskMgr98.exe",
 		"ProductName": "Task Manager 98",
-		"ProductVersion": "2026.9.28"
+		"ProductVersion": "1.26.9.28"
 	},
 	"VarFileInfo": {
 		"Translation": { "LangID": "0409", "CharsetID": "04B0" }

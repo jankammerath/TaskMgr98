@@ -6,7 +6,7 @@
 
   <Package Name="Task Manager 98"
            Manufacturer="Jan Kamerath"
-           Version="2026.9.28"
+           Version="1.26.9.28"
            UpgradeCode="9f1c36c2-4e1a-4c7b-a1d0-7c9b98d3a5e1"
            Language="1033"
            InstallerVersion="500"
