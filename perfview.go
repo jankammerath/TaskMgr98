@@ -291,7 +291,7 @@ func setPerfChildFontProc(hwnd syscall.Handle, lParam uintptr) (result uintptr) 
 }
 
 // cpuChartGrid returns the per-CPU chart grid (columns, rows) that fits width w
-// with each chart at least 90px wide.
+// with each chart at least 90px wide; every row gets the same number of charts.
 func cpuChartGrid(w int32) (perRow, rows int) {
 	n := len(cpuHistories)
 	if !cpuHistoryPerCPU || n <= 1 {
@@ -299,9 +299,17 @@ func cpuChartGrid(w int32) (perRow, rows int) {
 	}
 	const minChartW = 90
 	gap := int32(4)
-	perRow = int((w + gap) / (minChartW + gap))
-	perRow = max(min(perRow, n), 1)
-	rows = (n + perRow - 1) / perRow
+	maxFit := int((w + gap) / (minChartW + gap))
+	maxFit = max(min(maxFit, n), 1)
+	// largest divisor of n that fits keeps every row equally filled
+	perRow = 1
+	for c := maxFit; c > 1; c-- {
+		if n%c == 0 {
+			perRow = c
+			break
+		}
+	}
+	rows = n / perRow
 	return perRow, rows
 }
 
@@ -599,25 +607,17 @@ func perfGraphWndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintpt
 				bgBrush, _, _ := procGetSysColorBrush.Call(colorBtnFace)
 				procFillRect.Call(memDC, uintptr(unsafe.Pointer(&rc)), bgBrush)
 				perRow, rows := cpuChartGrid(w)
-				subH := (h - gap*int32(rows-1)) / int32(rows)
-				for row := 0; row < rows; row++ {
-					// Each row stretches to the full width; a shorter last row gets wider panels.
-					rowN := min(perRow, n-row*perRow)
-					subW := (w - gap*int32(rowN-1)) / int32(rowN)
-					top := int32(row) * (subH + gap)
-					bottom := top + subH
-					if row == rows-1 {
-						bottom = h
+				// Proportional cell boundaries span the full width/height with at most 1px size variance.
+				for i := 0; i < n; i++ {
+					row := int32(i / perRow)
+					col := int32(i % perRow)
+					sub := rect{
+						left:   col * (w + gap) / int32(perRow),
+						top:    row * (h + gap) / int32(rows),
+						right:  (col+1)*(w+gap)/int32(perRow) - gap,
+						bottom: (row+1)*(h+gap)/int32(rows) - gap,
 					}
-					for col := 0; col < rowN; col++ {
-						left := int32(col) * (subW + gap)
-						right := left + subW
-						if col == rowN-1 {
-							right = w
-						}
-						i := row*perRow + col
-						drawFramed(rect{left: left, top: top, right: right, bottom: bottom}, cpuHistories[i], kernelHistories[i])
-					}
+					drawFramed(sub, cpuHistories[i], kernelHistories[i])
 				}
 			} else {
 				drawFramed(rc, cpuHistory, kernelHistory)
