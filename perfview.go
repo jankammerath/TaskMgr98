@@ -599,12 +599,25 @@ func perfGraphWndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintpt
 				bgBrush, _, _ := procGetSysColorBrush.Call(colorBtnFace)
 				procFillRect.Call(memDC, uintptr(unsafe.Pointer(&rc)), bgBrush)
 				perRow, rows := cpuChartGrid(w)
-				subW := (w - gap*int32(perRow-1)) / int32(perRow)
 				subH := (h - gap*int32(rows-1)) / int32(rows)
-				for i := 0; i < n; i++ {
-					left := int32(i%perRow) * (subW + gap)
-					top := int32(i/perRow) * (subH + gap)
-					drawFramed(rect{left: left, top: top, right: left + subW, bottom: top + subH}, cpuHistories[i], kernelHistories[i])
+				for row := 0; row < rows; row++ {
+					// Each row stretches to the full width; a shorter last row gets wider panels.
+					rowN := min(perRow, n-row*perRow)
+					subW := (w - gap*int32(rowN-1)) / int32(rowN)
+					top := int32(row) * (subH + gap)
+					bottom := top + subH
+					if row == rows-1 {
+						bottom = h
+					}
+					for col := 0; col < rowN; col++ {
+						left := int32(col) * (subW + gap)
+						right := left + subW
+						if col == rowN-1 {
+							right = w
+						}
+						i := row*perRow + col
+						drawFramed(rect{left: left, top: top, right: right, bottom: bottom}, cpuHistories[i], kernelHistories[i])
+					}
 				}
 			} else {
 				drawFramed(rc, cpuHistory, kernelHistory)
@@ -653,10 +666,13 @@ func drawBarMeter(hdc uintptr, rc rect, percent, kernelPercent int, label string
 	meterLeft := int32(6) + (fullWidth-segWidth)/2
 	meterRight := meterLeft + segWidth
 
-	// Draw segments in LED bar style
-	numSegments := int32(12)
+	// Draw segments in LED bar style; fixed segment height, taller meters get more segments
 	segGap := int32(2)
-	segHeight := (meterHeight - (numSegments-1)*segGap) / numSegments
+	segHeight := int32(6)
+	numSegments := (meterHeight + segGap) / (segHeight + segGap)
+	if numSegments < 1 {
+		numSegments = 1
+	}
 
 	litSegments := int32((int64(percent)*int64(numSegments) + 50) / 100)
 	kernelSegments := int32(0)
