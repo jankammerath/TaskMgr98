@@ -290,6 +290,21 @@ func setPerfChildFontProc(hwnd syscall.Handle, lParam uintptr) (result uintptr) 
 	return enumContinue
 }
 
+// cpuChartGrid returns the per-CPU chart grid (columns, rows) that fits width w
+// with each chart at least 90px wide.
+func cpuChartGrid(w int32) (perRow, rows int) {
+	n := len(cpuHistories)
+	if !cpuHistoryPerCPU || n <= 1 {
+		return 1, 1
+	}
+	const minChartW = 90
+	gap := int32(4)
+	perRow = int((w + gap) / (minChartW + gap))
+	perRow = max(min(perRow, n), 1)
+	rows = (n + perRow - 1) / perRow
+	return perRow, rows
+}
+
 func layoutPerfView() {
 	if hwndPerfContainer == 0 || hwndTab == 0 {
 		return
@@ -309,18 +324,22 @@ func layoutPerfView() {
 	topHalfH := (h - pad*4) / 2
 	graphH := (topHalfH - pad*3) / 2
 
-	// Top row: CPU Usage & History
-	y1 := pad
-	procMoveWindow.Call(uintptr(hwndGrpCPUUsage), uintptr(pad), uintptr(y1), uintptr(meterW), uintptr(graphH), 1)
-	procMoveWindow.Call(uintptr(hwndCPUMeter), uintptr(pad+8), uintptr(y1+18), uintptr(meterW-16), uintptr(graphH-26), 1)
-
+	// Top row: CPU Usage & History; both boxes grow together when the per-CPU
+	// charts wrap onto extra lines.
 	histX := pad + meterW + pad
 	histW := w - histX - pad
-	procMoveWindow.Call(uintptr(hwndGrpCPUHist), uintptr(histX), uintptr(y1), uintptr(histW), uintptr(graphH), 1)
-	procMoveWindow.Call(uintptr(hwndCPUHist), uintptr(histX+8), uintptr(y1+18), uintptr(histW-16), uintptr(graphH-26), 1)
+	_, chartRows := cpuChartGrid(histW - 16)
+	cpuGrpH := graphH + int32(chartRows-1)*(graphH-26+4)
+
+	y1 := pad
+	procMoveWindow.Call(uintptr(hwndGrpCPUUsage), uintptr(pad), uintptr(y1), uintptr(meterW), uintptr(cpuGrpH), 1)
+	procMoveWindow.Call(uintptr(hwndCPUMeter), uintptr(pad+8), uintptr(y1+18), uintptr(meterW-16), uintptr(cpuGrpH-26), 1)
+
+	procMoveWindow.Call(uintptr(hwndGrpCPUHist), uintptr(histX), uintptr(y1), uintptr(histW), uintptr(cpuGrpH), 1)
+	procMoveWindow.Call(uintptr(hwndCPUHist), uintptr(histX+8), uintptr(y1+18), uintptr(histW-16), uintptr(cpuGrpH-26), 1)
 
 	// Middle row: PF Usage & History
-	y2 := y1 + graphH + pad
+	y2 := y1 + cpuGrpH + pad
 	procMoveWindow.Call(uintptr(hwndGrpPFUsage), uintptr(pad), uintptr(y2), uintptr(meterW), uintptr(graphH), 1)
 	procMoveWindow.Call(uintptr(hwndPFMeter), uintptr(pad+8), uintptr(y2+18), uintptr(meterW-16), uintptr(graphH-26), 1)
 
@@ -503,6 +522,7 @@ func refreshPerCPUData() {
 		kernelHistories = make([][]int, n)
 		prevCPUPerf = make([]sysProcPerfInfo, n)
 		havePrevCPUPerf = false
+		layoutPerfView() // CPU count now known; chart grid may need extra rows
 	}
 
 	if havePrevCPUPerf {
@@ -578,10 +598,13 @@ func perfGraphWndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintpt
 				gap := int32(4)
 				bgBrush, _, _ := procGetSysColorBrush.Call(colorBtnFace)
 				procFillRect.Call(memDC, uintptr(unsafe.Pointer(&rc)), bgBrush)
-				subW := (w - gap*int32(n-1)) / int32(n)
+				perRow, rows := cpuChartGrid(w)
+				subW := (w - gap*int32(perRow-1)) / int32(perRow)
+				subH := (h - gap*int32(rows-1)) / int32(rows)
 				for i := 0; i < n; i++ {
-					left := int32(i) * (subW + gap)
-					drawFramed(rect{left: left, top: 0, right: left + subW, bottom: h}, cpuHistories[i], kernelHistories[i])
+					left := int32(i%perRow) * (subW + gap)
+					top := int32(i/perRow) * (subH + gap)
+					drawFramed(rect{left: left, top: top, right: left + subW, bottom: top + subH}, cpuHistories[i], kernelHistories[i])
 				}
 			} else {
 				drawFramed(rc, cpuHistory, kernelHistory)

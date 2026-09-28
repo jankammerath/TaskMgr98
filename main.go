@@ -454,6 +454,7 @@ func wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintptr) (resul
 		case idViewCPUHistAll, idViewCPUHistPer:
 			cpuHistoryPerCPU = wParam&0xFFFF == idViewCPUHistPer
 			syncPerfViewMenuChecks()
+			layoutPerfView() // grid row count may change
 			procInvalidateRect.Call(uintptr(hwndCPUHist), 0, 0)
 			return 0
 		case idViewKernelTime:
