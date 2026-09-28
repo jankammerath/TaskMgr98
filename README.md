@@ -16,6 +16,16 @@ If you do not want to use an installer, you can download a ZIP-file that contain
 - [Standalone EXE-file for x64 (Intel and AMD)](https://github.com/jankammerath/TaskMgr98/releases/download/2026.9.27/TaskMgr98.x64.20260927.zip)
 - [Standalone EXE-file for Arm64 (Qualcomm etc.)](https://github.com/jankammerath/TaskMgr98/releases/download/2026.9.27/TaskMgr98.Arm64.20260927.zip)
 
+### Fixing the Defender Smart Screen
+
+Executing `TaskMgr98.exe` or the respective installation MSI package may be blocked by Windows Defender. Execute the following PowerShell command to unblock the file for execution.
+
+```powershell
+Unblock-File -Path .\TaskMgr98.exe
+```
+
+Afterwards you're able to execute the application.
+
 ## Screenshots
 
 ![Applications](doc/applist.jpg)
