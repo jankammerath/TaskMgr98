@@ -668,7 +668,7 @@ func drawBarMeter(hdc uintptr, rc rect, percent, kernelPercent int, label string
 
 	// Draw segments in LED bar style; fixed segment height, taller meters get more segments
 	segGap := int32(2)
-	segHeight := int32(6)
+	segHeight := int32(3)
 	numSegments := (meterHeight + segGap) / (segHeight + segGap)
 	if numSegments < 1 {
 		numSegments = 1
