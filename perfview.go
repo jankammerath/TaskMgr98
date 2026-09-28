@@ -333,11 +333,20 @@ func layoutPerfView() {
 	graphH := (topHalfH - pad*3) / 2
 
 	// Top row: CPU Usage & History; both boxes grow together when the per-CPU
-	// charts wrap onto extra lines.
+	// charts wrap onto extra lines, but never so far that the PF row and stat
+	// boxes would be pushed off-screen.
 	histX := pad + meterW + pad
 	histW := w - histX - pad
 	_, chartRows := cpuChartGrid(histW - 16)
 	cpuGrpH := graphH + int32(chartRows-1)*(graphH-26+4)
+	minStatBoxH := int32(76) // group header + 3 stat lines
+	maxCPUGrpH := h - graphH - pad*5 - 2*minStatBoxH
+	if cpuGrpH > maxCPUGrpH {
+		cpuGrpH = maxCPUGrpH
+	}
+	if cpuGrpH < graphH {
+		cpuGrpH = graphH
+	}
 
 	y1 := pad
 	procMoveWindow.Call(uintptr(hwndGrpCPUUsage), uintptr(pad), uintptr(y1), uintptr(meterW), uintptr(cpuGrpH), 1)
