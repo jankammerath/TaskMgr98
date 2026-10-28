@@ -1,5 +1,7 @@
 # Task Manager 98
 
+[![GitHub Sponsor](https://img.shields.io/badge/sponsor-30363D?style=flat&logo=GitHub-Sponsors&logoColor=ea4aaa)](https://github.com/sponsors/jankammerath)
+
 Rewrite of the classic Windows 98, NT4 and Windows XP Task Manager for Windows 11 (arm64 and x86_64). It is rewritten based on and has feature parity with Task Manager Version 5.1 (Build 2600.xpsp_sp2_rtm.040803-2158) from 2001. Task Manager 98 is written in Go and only uses Windows system libraries for the User Interface and all its functionality. The original Task Manager 5.1 was written in C++ by Microsoft. The rewrite in Go ensures better memory safety while keeping very good performance as a self-contained binary.
 
 ![Task Manager 98 on Windows 11](doc/TaskMgr98.png)
@@ -25,6 +27,10 @@ Unblock-File -Path .\TaskMgr98.exe
 ```
 
 Afterwards you're able to execute the application.
+
+## Support this project
+
+This project is independently developed and maintained. If it helps you, and you enjoy using it, consider [sponsoring on GitHub](https://github.com/sponsors/jankammerath). Your support funds bug fixes, feature releases, and testing across different hardware environments. This isn't just TaskMgr98, but many future tools that I could be writing, if enough funding exists.
 
 ## Screenshots
 
